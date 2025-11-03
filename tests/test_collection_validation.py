@@ -12,38 +12,38 @@ class TestValidateCollectionIds(TestCase):
 
     def test_single_id(self):
         """Test with a single collection ID."""
-        result = validate_collection_ids(['id123'])
+        result = validate_collection_ids('id123')
         self.assertEqual(result, ['id123'])
 
-    def test_multiple_ids(self):
-        """Test with multiple space-separated collection IDs."""
-        result = validate_collection_ids(['id1', 'id2', 'id3'])
-        self.assertEqual(result, ['id1', 'id2', 'id3'])
+    def test_bad_multiple_ids(self):
+        """Checks that with multiple space-separated collection IDs returns only a single string list-element."""
+        result = validate_collection_ids('id1 id2 id3')
+        self.assertEqual(result, ['id1 id2 id3'])
 
-    def test_comma_separated_ids(self):
-        """Test with comma-separated collection IDs."""
-        result = validate_collection_ids(['id1,id2,id3'])
+    def test_good_comma_separated_ids(self):
+        """Checks that with comma-separated collection IDs returns a list of strings."""
+        result = validate_collection_ids('id1,id2,id3')
         self.assertEqual(result, ['id1', 'id2', 'id3'])
 
     def test_mixed_separators(self):
-        """Test with mixed space and comma separators."""
-        result = validate_collection_ids(['id1,id2', 'id3,id4'])
-        self.assertEqual(result, ['id1', 'id2', 'id3', 'id4'])
+        """Checks that mixed space and comma separators returns a value-error."""
+        with self.assertRaises(ValueError):
+            validate_collection_ids('id1,id2 id3')
 
     def test_whitespace_handling(self):
-        """Test handling of whitespace in input."""
-        result = validate_collection_ids(['  id1  ', '  id2  ,  id3  '])
+        """Checks handling of whitespace in input."""
+        result = validate_collection_ids('  id1,id2  ,  id3  ')
         self.assertEqual(result, ['id1', 'id2', 'id3'])
 
     def test_empty_strings(self):
-        """Test that empty strings are filtered out."""
-        result = validate_collection_ids(['id1', '', 'id2', '  ', 'id3'])
-        self.assertEqual(result, ['id1', 'id2', 'id3'])
+        """Checks that empty strings raise a value-error."""
+        with self.assertRaises(ValueError):
+            validate_collection_ids(' ')
 
     def test_empty_input(self):
         """Test that empty input raises ValueError."""
         with self.assertRaises(ValueError):
-            validate_collection_ids([])
+            validate_collection_ids('')
 
     def test_none_input(self):
         """Test that None input raises ValueError."""
@@ -51,9 +51,9 @@ class TestValidateCollectionIds(TestCase):
             validate_collection_ids(None)
 
     def test_all_empty_strings(self):
-        """Test that input with only empty strings raises ValueError."""
+        """Test that input with only empty non-value strings raises ValueError."""
         with self.assertRaises(ValueError):
-            validate_collection_ids(['', '  ', '\t', '\n'])
+            validate_collection_ids('\t')
 
 
 if __name__ == '__main__':

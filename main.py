@@ -2,13 +2,14 @@ import argparse
 from argparse import Namespace
 
 
-def validate_collection_ids(collection_input: list[str] | None) -> list[str]:
+def validate_collection_ids(collection_input: str) -> list[str]:
     """
     Validates and processes collection IDs from input.
     Called by handle_args().
     """
     if not collection_input:
         raise ValueError('No collection IDs provided')
+    print(f'collection_input in validate_collection_ids(): ``{collection_input}``')
     split_ids = []
     ## handle list of strings as well as a single string with comma-separated values
     for id_string in collection_input:
@@ -34,14 +35,14 @@ def handle_args() -> Namespace:
     group.add_argument(
         '--collection_ids',
         type=str,
-        nargs='+',
-        help='Space-separated list of collection IDs (can include comma-separated values)',
+        help='Comma-separated list of collection IDs',
     )
 
     args = parser.parse_args()
 
     # Validate collection_ids if provided
     if hasattr(args, 'collection_ids') and args.collection_ids:
+        print(f'args.collection_ids in handle_args(): ``{args.collection_ids}``')
         try:
             args.collection_ids = validate_collection_ids(args.collection_ids)
         except ValueError as e:
@@ -71,6 +72,7 @@ def manage_tracker_check() -> None:
         print(f'Processing single collection: {args.collection_id}')
         check_collection(collection_id=args.collection_id)
     elif args.collection_ids:
+        print(f'args.collection_ids in manage_tracker_check(): ``{args.collection_ids}``')
         print(f'Processing multiple collections: {", ".join(args.collection_ids)}')
         for cid in args.collection_ids:
             check_collection(collection_id=cid)
