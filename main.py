@@ -6,19 +6,36 @@ def validate_collection_ids(collection_input: str) -> list[str]:
     """
     Validates and processes collection IDs from input.
     Called by handle_args().
+
+    Args:
+        collection_input: A string containing comma-separated collection IDs
+
+    Returns:
+        List of cleaned collection IDs
+
+    Raises:
+        ValueError: If no valid collection IDs are found, input is invalid,
+                   or if both spaces and commas are used as separators
     """
-    if not collection_input:
+    if not collection_input or not collection_input.strip():
         raise ValueError('No collection IDs provided')
-    print(f'collection_input in validate_collection_ids(): ``{collection_input}``')
-    split_ids = []
-    ## handle list of strings as well as a single string with comma-separated values
-    for id_string in collection_input:
-        split_ids.extend(id_string.split(','))
-    ## filter out empty strings and strip whitespace
-    cleaned_ids = [id_str.strip() for id_str in split_ids if id_str.strip()]
-    ## raise error if no valid IDs found
+
+    input_str = collection_input.strip()
+
+    # Check for mixed separators (both spaces and commas)
+    if ' ' in input_str and ',' in input_str:
+        raise ValueError('Use either spaces or commas to separate IDs, not both')
+
+    # If only spaces are used as separators, treat as a single ID
+    if ' ' in input_str:
+        return [input_str]
+
+    # Split on commas and clean up the results
+    cleaned_ids = [id_str.strip() for id_str in input_str.split(',') if id_str.strip()]
+
     if not cleaned_ids:
         raise ValueError('No valid collection IDs found after processing input')
+
     return cleaned_ids
 
 

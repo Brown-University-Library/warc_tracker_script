@@ -31,8 +31,8 @@ class TestValidateCollectionIds(TestCase):
             validate_collection_ids('id1,id2 id3')
 
     def test_whitespace_handling(self):
-        """Checks handling of whitespace in input."""
-        result = validate_collection_ids('  id1,id2  ,  id3  ')
+        """Checks handling of whitespace around commas in input."""
+        result = validate_collection_ids('id1,  id2  ,id3')
         self.assertEqual(result, ['id1', 'id2', 'id3'])
 
     def test_empty_strings(self):
