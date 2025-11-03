@@ -1,38 +1,48 @@
 import argparse
+import logging
+import os
 from argparse import Namespace
+
+## setup logging
+log_level_name: str = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(
+    logging, log_level_name, logging.INFO
+)  # maps the string name to the corresponding logging level constant; defaults to INFO
+logging.basicConfig(
+    level=log_level,
+    format='[%(asctime)s] %(levelname)s [%(module)s-%(funcName)s()::%(lineno)d] %(message)s',
+    datefmt='%d/%b/%Y %H:%M:%S',
+)
+log = logging.getLogger(__name__)
 
 
 def validate_collection_ids(collection_input: str) -> list[str]:
     """
     Validates and processes collection IDs from input.
     Called by handle_args().
-
-    Args:
-        collection_input: A string containing comma-separated collection IDs
-
-    Returns:
-        List of cleaned collection IDs
-
-    Raises:
-        ValueError: If no valid collection IDs are found, input is invalid,
-                   or if both spaces and commas are used as separators
     """
+    log.debug(f'collection_input: {collection_input}')
     if not collection_input or not collection_input.strip():
+        log.debug('nopePreA')
         raise ValueError('No collection IDs provided')
 
     input_str = collection_input.strip()
+    log.debug(f'input_str: {input_str}')
 
     # If commas are present, treat commas as the only valid separators.
     # Spaces around commas are allowed, but spaces used as separators in
     # addition to commas are not allowed (e.g., "id1,id2 id3").
     if ',' in input_str:
         parts = [part.strip() for part in input_str.split(',')]
+        log.debug(f'parts: {parts}')
         # If any part still contains a space, then spaces were used as separators
         # in addition to commas; that's invalid mixed separators.
         if any(' ' in part for part in parts if part):
+            log.debug('nopeA')
             raise ValueError('Use either spaces or commas to separate IDs, not both')
         cleaned_ids = [part for part in parts if part]
         if not cleaned_ids:
+            log.debug('nopeB')
             raise ValueError('No valid collection IDs found after processing input')
         return cleaned_ids
 
@@ -60,7 +70,7 @@ def handle_args() -> Namespace:
 
     # Validate collection_ids if provided
     if hasattr(args, 'collection_ids') and args.collection_ids:
-        print(f'args.collection_ids in handle_args(): ``{args.collection_ids}``')
+        log.debug(f'args.collection_ids in handle_args(): ``{args.collection_ids}``')
         try:
             args.collection_ids = validate_collection_ids(args.collection_ids)
         except ValueError as e:
@@ -74,7 +84,7 @@ def check_collection(collection_id: str) -> None:
     Processes a single collection ID.
     Called by manage_tracker_check().
     """
-    print(f'Processing collection: {collection_id}')
+    log.info(f'Processing collection: {collection_id}')
 
 
 def manage_tracker_check() -> None:
@@ -87,11 +97,11 @@ def manage_tracker_check() -> None:
     args: Namespace = handle_args()
 
     if args.collection_id:
-        print(f'Processing single collection: {args.collection_id}')
+        log.debug(f'Processing single collection: {args.collection_id}')
         check_collection(collection_id=args.collection_id)
     elif args.collection_ids:
-        print(f'args.collection_ids in manage_tracker_check(): ``{args.collection_ids}``')
-        print(f'Processing multiple collections: {", ".join(args.collection_ids)}')
+        log.debug(f'args.collection_ids in manage_tracker_check(): ``{args.collection_ids}``')
+        log.debug(f'Processing multiple collections: {", ".join(args.collection_ids)}')
         for cid in args.collection_ids:
             check_collection(collection_id=cid)
 
