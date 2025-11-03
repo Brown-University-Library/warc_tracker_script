@@ -4,21 +4,11 @@ from argparse import Namespace
 
 def validate_collection_ids(collection_input: list[str] | None) -> list[str]:
     """
-    Validate and process collection IDs from input.
-
-    Args:
-        collection_input: List of strings containing collection IDs, which may include comma-separated values
-
-    Returns:
-        List of processed and validated collection IDs
-
-    Raises:
-        ValueError: If no valid collection IDs are found after processing
+    Validates and processes collection IDs from input.
+    Called by handle_args().
     """
     if not collection_input:
         raise ValueError('No collection IDs provided')
-
-    # Flatten the list by splitting each string on commas
     split_ids = []
     for id_string in collection_input:
         split_ids.extend(id_string.split(','))
@@ -34,13 +24,8 @@ def validate_collection_ids(collection_input: list[str] | None) -> list[str]:
 
 def handle_args() -> Namespace:
     """
-    Parse and return command line arguments.
-
-    Returns:
-        Parsed command line arguments with validated collection IDs
-
-    Raises:
-        ValueError: If collection_ids is provided but empty after processing
+    Parses and returns command line arguments.
+    Called by manage_tracker_check().
     """
     parser = argparse.ArgumentParser(description='Manage WARC tracker checks.')
 
@@ -68,10 +53,8 @@ def handle_args() -> Namespace:
 
 def check_collection(collection_id: str) -> None:
     """
-    Process a single collection ID.
-
-    Args:
-        collection_id: The collection ID to process
+    Processes a single collection ID.
+    Called by manage_tracker_check().
     """
     print(f'Processing collection: {collection_id}')
 
