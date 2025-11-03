@@ -10,15 +10,14 @@ def validate_collection_ids(collection_input: list[str] | None) -> list[str]:
     if not collection_input:
         raise ValueError('No collection IDs provided')
     split_ids = []
+    ## handle list of strings as well as a single string with comma-separated values
     for id_string in collection_input:
         split_ids.extend(id_string.split(','))
-
-    # Clean and validate the IDs
+    ## filter out empty strings and strip whitespace
     cleaned_ids = [id_str.strip() for id_str in split_ids if id_str.strip()]
-
+    ## raise error if no valid IDs found
     if not cleaned_ids:
         raise ValueError('No valid collection IDs found after processing input')
-
     return cleaned_ids
 
 
