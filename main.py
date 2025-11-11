@@ -1,15 +1,16 @@
 import json
 import logging
 import os
+import random
 
 import dotenv
 import gspread
 from google.oauth2.service_account import Credentials
 
+import helpers
+
 dotenv.load_dotenv()
 
-
-## settings ---------------------------------------------------------
 GSHEET_CREDENTIALS: dict = json.loads(os.environ['GSHEET_CREDENTIALS_JSON'])
 GSHEET_ID: str = os.environ['GSHEET_SPREADSHEET_ID']
 LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
@@ -27,47 +28,83 @@ log = logging.getLogger(__name__)
 
 def run_simple_read() -> None:
     """
-    Demonstrates how to use the Google Sheets API to read-from a Google Sheet.
+    Demonstrates how to read from a gsheet via gspread.
     Called by manage_gsheet_writer().
     """
-    limited_scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-    credentials = Credentials.from_service_account_info(GSHEET_CREDENTIALS, scopes=limited_scopes)
-    client = gspread.authorize(credentials)
-    sheet = client.open_by_key(GSHEET_ID)
-    values_list = sheet.sheet1.row_values(1)
-
+    limited_scopes: list[str] = ['https://www.googleapis.com/auth/spreadsheets.readonly']  # read-only access
+    credentials: Credentials = Credentials.from_service_account_info(GSHEET_CREDENTIALS, scopes=limited_scopes)
+    client: gspread.Client = gspread.authorize(credentials)
+    spsheet: gspread.Spreadsheet = client.open_by_key(GSHEET_ID)
+    values_list = spsheet.sheet1.row_values(1)  # sheet1 is the worksheet; row_values(1) is the first row
     log.info(f'values_list: ``{values_list}``')
     return None
 
 
-# def run_simple_write() -> None:
-#     """
-#     Demonstrates how to use the Google Sheets API to write-to a Google Sheet.
-#     """
-#     return None
+def tweak_worksheet() -> None:
+    """
+    Demonstrates how to update the worksheet-title via gspread.
+    Called by manage_gsheet_writer().
+    """
+    client: gspread.Client = helpers.get_gspread_client()
+    spsheet: gspread.Spreadsheet = client.open_by_key(GSHEET_ID)
+    sheets = spsheet.worksheets()
+    log.info(f'sheets initially: ``{sheets}``')
+    # target_sheet: gspread.Worksheet = spsheet.worksheet('Sheet1')  # by name
+    target_sheet: gspread.Worksheet = sheets[0]  # by index
+    new_title: str = f'new_title_{random.randint(0, 1000):04d}'
+    target_sheet.update_title(new_title)
+    log.info(f'sheets now: ``{sheets}``')
+    return None
+
+
+def run_simple_write() -> None:
+    """
+    Demonstrates how to write to a gsheet via gspread.
+    Called by manage_gsheet_writer().
+    """
+    ## get client and spreadsheet -----------------------------------
+    client: gspread.Client = helpers.get_gspread_client()
+    spsheet: gspread.Spreadsheet = client.open_by_key(GSHEET_ID)
+    sheets = spsheet.worksheets()
+    ## get target worksheet -----------------------------------------
+    target_sheet: gspread.Worksheet = sheets[0]  # by index
+    log.info(f'target_sheet: ``{target_sheet}``')
+    ## update worksheet value ---------------------------------------
+    new_value: str = f'new_value_{random.randint(0, 1000):04d}'
+    target_sheet.update_acell('B1', new_value)
+    values_list = target_sheet.row_values(1)
+    log.info(f'values_list after update: ``{values_list}``')
+    return None
+
+
+def run_find() -> None:
+    """
+    Demonstrates how to find a value in a gsheet via gspread.
+    Called by manage_gsheet_writer().
+    """
+    client: gspread.Client = helpers.get_gspread_client()
+    spsheet: gspread.Spreadsheet = client.open_by_key(GSHEET_ID)
+    sheets = spsheet.worksheets()
+    target_sheet: gspread.Worksheet = sheets[0]  # by index
+    cell: gspread.Cell = target_sheet.find('secret-data-here')
+    log.info(f'cell: ``{cell}``')
+    log.info(f'cell.row: ``{cell.row}``')
+    log.info(f'cell.col: ``{cell.col}``')
+    return None
 
 
 def manage_gsheet_writer() -> None:
     """
     Demonstrates how to use the Google Sheets API to read-from and write-to a Google Sheet.
     """
-    # args: Namespace = handle_args()
-    # if args.collection_id:
-    #     log.debug(f'Processing single collection: {args.collection_id}')
-    #     check_collection(args.collection_id)
-    # elif args.collection_ids:
-    #     log.debug(f'args.collection_ids in manage_tracker_check(): ``{args.collection_ids}``')
-    #     log.debug(f'Processing multiple collections: {", ".join(args.collection_ids)}')
-    #     for cid in args.collection_ids:
-    #         check_collection(cid)
-
     ## confirm we're reading settings -------------------------------
     log.info(f'project_id, ``{GSHEET_CREDENTIALS["project_id"]}``')
     log.info(f'service-account-email, ``{GSHEET_CREDENTIALS["client_email"]}``')
 
-    ## simple-read --------------------------------------------------
-    run_simple_read()
-
+    # run_simple_read()
+    # tweak_worksheet()
+    # run_simple_write()
+    run_find()
     return None
 
 

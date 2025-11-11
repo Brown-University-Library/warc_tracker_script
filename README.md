@@ -1,5 +1,9 @@
 # warc-tracker-script
 
+## gspread documentation
+<https://docs.gspread.org/en/latest/>
+
+
 ## Purpose
 
 This is an under-development script to track WARC files downloaded (for backup purposes) from the Internet Archive.
