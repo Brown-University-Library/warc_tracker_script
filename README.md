@@ -20,12 +20,11 @@ This is an under-development script to track WARC files downloaded (for backup p
 
 ## Work-plan
 - [ ] Determine whether to _start_ with a google-spreadsheet or an editable webpage to list and track collections and crawls.
-    - Thinking: g-spreadsheet _is_ absolutely the way to go for production, but would require a solid investment of time to re-implement our ability to update google-docs programmatically.
+    - Thinking: g-spreadsheet _is_ absolutely the way to go for production, but might require a solid investment of time to re-implement our ability to update google-docs programmatically from a brown account.
     - For now, we need to display a source of truth for active collections (maybe just reference the active google spreadsheets that H already uses?) -- so I may go with a tabulator.js page initially.
     - Result: 
         - going to try gsheet
-        - this week researched impressed with tabulator.js
+        - this week researched tabulator.js and was impressed with tabulator.js
         - will spend Mon-Nov-10 working on the gsheet
-    - spend 
 
 ---

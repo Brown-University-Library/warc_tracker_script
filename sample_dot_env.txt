@@ -1,0 +1,16 @@
+## all capps values are provided by setting up the service-account in the google cloud console
+GSHEET_CREDENTIALS_JSON='{
+  "type": "service_account",
+  "project_id": "project-its-gsheet-connector",
+  "private_key_id": "THE-PRIVATE-KEY-ID",
+  "private_key": "THE-PRIVATE-KEY",
+  "client_email": "SA-NAME@PROJECT-NAME.IAM.GSERVICEACCOUNT.COM",  # SA-NAME is the name of the service-account and PROJECT-NAME is the name of the project
+  "client_id": "THE-CLIENT-ID",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "THE-CLIENT-X509-CERT-URL",
+  "universe_domain": "googleapis.com"
+}'
+
+LOG_LEVEL="DEBUG"
