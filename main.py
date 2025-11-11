@@ -5,8 +5,9 @@ import random
 
 import dotenv
 import gspread
-import helpers
 from google.oauth2.service_account import Credentials
+
+import helpers
 
 dotenv.load_dotenv()
 
@@ -101,9 +102,9 @@ def manage_gsheet_writer() -> None:
     log.info(f'service-account-email, ``{GSHEET_CREDENTIALS["client_email"]}``')
 
     run_simple_read()
-    # tweak_worksheet()
-    # run_simple_write()
-    # run_find()
+    tweak_worksheet()
+    run_simple_write()
+    run_find()
     return None
 
 
