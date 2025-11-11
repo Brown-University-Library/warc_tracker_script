@@ -1,7 +1,9 @@
+import argparse
 import json
 import logging
 import os
 import random
+from collections.abc import Callable
 
 import dotenv
 import gspread
@@ -93,23 +95,20 @@ def run_find() -> None:
     return None
 
 
-def manage_gsheet_writer() -> None:
-    """
-    Demonstrates how to use the Google Sheets API to read-from and write-to a Google Sheet.
-    """
-    ## confirm we're reading settings -------------------------------
-    log.info(f'project_id, ``{GSHEET_CREDENTIALS["project_id"]}``')
-    log.info(f'service-account-email, ``{GSHEET_CREDENTIALS["client_email"]}``')
+## Allowed actions and function map for CLI ----------------------------
+ALLOWED_ACTIONS: list[str] = [
+    'run_simple_read',
+    'tweak_worksheet',
+    'run_simple_write',
+    'run_find',
+]
 
-    run_simple_read()
-    tweak_worksheet()
-    run_simple_write()
-    run_find()
-    return None
-
-
-if __name__ == '__main__':
-    manage_gsheet_writer()
+FUNCTION_MAP: dict[str, Callable[[], None]] = {
+    'run_simple_read': run_simple_read,
+    'tweak_worksheet': tweak_worksheet,
+    'run_simple_write': run_simple_write,
+    'run_find': run_find,
+}
 
 
 # def manage_gsheet_writer() -> None:
@@ -125,3 +124,29 @@ if __name__ == '__main__':
 #     run_simple_write()
 #     run_find()
 #     return None
+
+
+def main() -> None:
+    """
+    Parses CLI argument and runs the named action if allowed; otherwise logs an invalid message.
+    """
+    parser = argparse.ArgumentParser(description='Interact with a Google Sheet via named actions.')
+    parser.add_argument(
+        'action',
+        nargs='?',
+        help='One of: ' + ', '.join(ALLOWED_ACTIONS),
+    )
+    args = parser.parse_args()
+
+    action: str | None = args.action
+    if action and action in ALLOWED_ACTIONS:
+        log.info(f'running action: `{action}`')
+        FUNCTION_MAP[action]()
+        return None
+
+    log.error('Invalid or missing action. Provide one of: ' + ', '.join(ALLOWED_ACTIONS))
+    return None
+
+
+if __name__ == '__main__':
+    main()
