@@ -1,13 +1,22 @@
-import argparse
+import json
 import logging
 import os
-from argparse import Namespace
+
+import dotenv
+import gspread
+from google.oauth2.service_account import Credentials
+
+dotenv.load_dotenv()
+
+
+## settings ---------------------------------------------------------
+GSHEET_CREDENTIALS: dict = json.loads(os.environ['GSHEET_CREDENTIALS_JSON'])
+GSHEET_ID: str = os.environ['GSHEET_SPREADSHEET_ID']
+LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
+
 
 ## setup logging
-log_level_name: str = os.getenv('LOG_LEVEL', 'INFO').upper()
-log_level = getattr(
-    logging, log_level_name, logging.INFO
-)  # maps the string name to the corresponding logging level constant; defaults to INFO
+log_level = getattr(logging, LOG_LEVEL)  # maps the string name to the corresponding logging level constant
 logging.basicConfig(
     level=log_level,
     format='[%(asctime)s] %(levelname)s [%(module)s-%(funcName)s()::%(lineno)d] %(message)s',
@@ -16,95 +25,51 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def validate_collection_ids(collection_input: str) -> list[str]:
+def run_simple_read() -> None:
     """
-    Validates and processes collection IDs from input.
-    Called by handle_args().
+    Demonstrates how to use the Google Sheets API to read-from a Google Sheet.
+    Called by manage_gsheet_writer().
     """
-    log.debug(f'collection_input: {collection_input}')
-    if not collection_input or not collection_input.strip():
-        log.debug('nopePreA')
-        raise ValueError('No collection IDs provided')
+    limited_scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+    credentials = Credentials.from_service_account_info(GSHEET_CREDENTIALS, scopes=limited_scopes)
+    client = gspread.authorize(credentials)
+    sheet = client.open_by_key(GSHEET_ID)
+    values_list = sheet.sheet1.row_values(1)
 
-    input_str = collection_input.strip()
-    log.debug(f'input_str: {input_str}')
-
-    # If commas are present, treat commas as the only valid separators.
-    # Spaces around commas are allowed, but spaces used as separators in
-    # addition to commas are not allowed (e.g., "id1,id2 id3").
-    if ',' in input_str:
-        parts = [part.strip() for part in input_str.split(',')]
-        log.debug(f'parts: {parts}')
-        # If any part still contains a space, then spaces were used as separators
-        # in addition to commas; that's invalid mixed separators.
-        if any(' ' in part for part in parts if part):
-            log.debug('nopeA')
-            raise ValueError('Use either spaces or commas to separate IDs, not both')
-        cleaned_ids = [part for part in parts if part]
-        if not cleaned_ids:
-            log.debug('nopeB')
-            raise ValueError('No valid collection IDs found after processing input')
-        return cleaned_ids
-
-    # No commas: treat the entire input as a single ID (even if it contains spaces)
-    return [input_str]
+    log.info(f'values_list: ``{values_list}``')
+    return None
 
 
-def handle_args() -> Namespace:
+# def run_simple_write() -> None:
+#     """
+#     Demonstrates how to use the Google Sheets API to write-to a Google Sheet.
+#     """
+#     return None
+
+
+def manage_gsheet_writer() -> None:
     """
-    Parses and returns command line arguments.
-    Called by manage_tracker_check().
+    Demonstrates how to use the Google Sheets API to read-from and write-to a Google Sheet.
     """
-    parser = argparse.ArgumentParser(description='Manage WARC tracker checks.')
+    # args: Namespace = handle_args()
+    # if args.collection_id:
+    #     log.debug(f'Processing single collection: {args.collection_id}')
+    #     check_collection(args.collection_id)
+    # elif args.collection_ids:
+    #     log.debug(f'args.collection_ids in manage_tracker_check(): ``{args.collection_ids}``')
+    #     log.debug(f'Processing multiple collections: {", ".join(args.collection_ids)}')
+    #     for cid in args.collection_ids:
+    #         check_collection(cid)
 
-    # Add mutually exclusive group for collection_id and collection_ids
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--collection_id', type=str, help='Single collection ID to process')
-    group.add_argument(
-        '--collection_ids',
-        type=str,
-        help='Comma-separated list of collection IDs',
-    )
+    ## confirm we're reading settings -------------------------------
+    log.info(f'project_id, ``{GSHEET_CREDENTIALS["project_id"]}``')
+    log.info(f'service-account-email, ``{GSHEET_CREDENTIALS["client_email"]}``')
 
-    args = parser.parse_args()
+    ## simple-read --------------------------------------------------
+    run_simple_read()
 
-    # Validate collection_ids if provided
-    if hasattr(args, 'collection_ids') and args.collection_ids:
-        log.debug(f'args.collection_ids in handle_args(): ``{args.collection_ids}``')
-        try:
-            args.collection_ids = validate_collection_ids(args.collection_ids)
-        except ValueError as e:
-            parser.error(f'--collection_ids: {str(e)}')
-
-    return args
-
-
-def check_collection(collection_id: str) -> None:
-    """
-    Processes a single collection ID.
-    Called by manage_tracker_check().
-    """
-    log.info(f'Processing collection: {collection_id}')
-
-
-def manage_tracker_check() -> None:
-    """
-    Main function to manage WARC tracker checks.
-
-    Handles both single collection and multiple collections processing
-    based on command line arguments.
-    """
-    args: Namespace = handle_args()
-
-    if args.collection_id:
-        log.debug(f'Processing single collection: {args.collection_id}')
-        check_collection(collection_id=args.collection_id)
-    elif args.collection_ids:
-        log.debug(f'args.collection_ids in manage_tracker_check(): ``{args.collection_ids}``')
-        log.debug(f'Processing multiple collections: {", ".join(args.collection_ids)}')
-        for cid in args.collection_ids:
-            check_collection(collection_id=cid)
+    return None
 
 
 if __name__ == '__main__':
-    manage_tracker_check()
+    manage_gsheet_writer()
