@@ -7,7 +7,6 @@ import dotenv
 import gspread
 from google.oauth2.service_account import Credentials
 
-
 dotenv.load_dotenv()
 
 log = logging.getLogger(__name__)
@@ -137,7 +136,7 @@ def parse_collection_id(value: str | None) -> int | None:
     return result
 
 
-def parse_collection_jobs(values: list[list[str]]) -> list[CollectionJob]:
+def parse_collection_jobs(values: list[list[str]], collection_id_filter: set[int] | None = None) -> list[CollectionJob]:
     """
     Parses collection jobs from a sheet value grid.
     """
@@ -152,6 +151,9 @@ def parse_collection_jobs(values: list[list[str]]) -> list[CollectionJob]:
             collection_id_cell = get_row_cell(row, header_location.column_map.get('collection_id'))
             collection_id = parse_collection_id(collection_id_cell)
             if collection_id is None:
+                continue
+
+            if collection_id_filter is not None and collection_id not in collection_id_filter:
                 continue
 
             active_value = get_row_cell(row, header_location.column_map.get('active_inactive'))
@@ -190,11 +192,11 @@ def get_row_cell(row: list[str], column_index: int | None) -> str | None:
     return result
 
 
-def fetch_collection_jobs(spreadsheet_id: str) -> list[CollectionJob]:
+def fetch_collection_jobs(spreadsheet_id: str, collection_id_filter: set[int] | None = None) -> list[CollectionJob]:
     """
     Fetches active collection jobs from the collection-level worksheet.
     """
     worksheet = get_collection_worksheet(spreadsheet_id)
     values = worksheet.get_all_values()
-    result = parse_collection_jobs(values)
+    result = parse_collection_jobs(values, collection_id_filter)
     return result

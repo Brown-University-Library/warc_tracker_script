@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import TestCase
 
 sys.path.append(str(Path(__file__).parent.parent))  # add project directory to the Python path
-from main import validate_collection_ids  # continue imports
+from lib.collection_filters import validate_collection_ids  # continue imports
 
 
 class TestValidateCollectionIds(TestCase):

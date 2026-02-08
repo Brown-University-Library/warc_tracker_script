@@ -69,6 +69,19 @@ class TestParseCollectionJobs(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].collection_id, 789)
 
+    def test_collection_id_filter(self):
+        """
+        Checks that collection id filters include only selected ids.
+        """
+        values = [
+            ['Collection ID', 'Repository', 'Active/Inactive'],
+            ['111', 'UA', 'Active'],
+            ['222', 'MS', 'Active'],
+        ]
+        result = parse_collection_jobs(values, {222})
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].collection_id, 222)
+
 
 if __name__ == '__main__':
     unittest.main()
