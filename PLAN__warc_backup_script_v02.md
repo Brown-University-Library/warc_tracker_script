@@ -145,7 +145,7 @@ Per collection:
      (even if some downloads fail; failures are retried via manifest + overlap)
    - Update `recent_window_filenames` to include filenames in the newest lookback window.
 
-### Why the overlap window is required (the “B file” example)
+### Why the overlap window is required 
 
 If a prior run’s enumeration is incomplete (paging interrupted, transient API error, etc.) and you advance the watermark to the newest observed store-time, a missed file whose store-time is older than the watermark can be skipped forever **unless** you re-scan a bounded time window and dedupe by filename.
 
