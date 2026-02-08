@@ -5,7 +5,7 @@ from unittest import TestCase
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from collection_sheet import parse_collection_id, parse_collection_jobs
+from lib.collection_sheet import parse_collection_id, parse_collection_jobs
 
 
 class TestParseCollectionId(TestCase):

@@ -2,7 +2,8 @@ import logging
 import os
 
 import dotenv
-from collection_sheet import fetch_collection_jobs
+
+from lib.collection_sheet import fetch_collection_jobs
 
 dotenv.load_dotenv()
 
