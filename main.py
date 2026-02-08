@@ -3,7 +3,6 @@ import os
 
 import dotenv
 
-from lib.collection_filters import load_collection_id_filter
 from lib.collection_sheet import fetch_collection_jobs
 
 dotenv.load_dotenv()
@@ -31,8 +30,7 @@ def main() -> None:
         log.error('Missing GSHEET_SPREADSHEET_ID environment variable.')
         return None
 
-    collection_id_filter = load_collection_id_filter()
-    collection_jobs = fetch_collection_jobs(spreadsheet_id, collection_id_filter)
+    collection_jobs = fetch_collection_jobs(spreadsheet_id)
     log.info('Active collections found: %s', len(collection_jobs))
     return None
 
