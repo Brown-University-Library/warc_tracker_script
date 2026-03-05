@@ -351,7 +351,10 @@ Recommended approach:
 After processing a collection (or periodically during):
 
 - `Server File path- collection level` (if empty or changed)
-- `Last WASAPI fetch` (date string, set when you complete processing; optionally also write “in progress” markers elsewhere)
+- `Last WASAPI fetch` (date string, set when you complete processing)
+- **In Progress marker** (write when processing starts, clear when complete) — format: `In Progress (run: 20250305-143000-a1b2)`
+  - This includes the `run_id` (timestamp-based identifier) for traceability
+  - Benefits: links spreadsheet status directly to specific log files and local state; enables debugging if a collection appears "stuck"; supports audit correlation
 - `Total Size` (human-readable, or bytes normalized later)
 - `File Count ?` (count of locally-present WARCs for the collection)
 - `Seed Count` (if you query seeds; otherwise leave unchanged)
@@ -371,9 +374,11 @@ Only if you decide seed-level tracking is valuable early:
 
 To reduce divergence between reality and sheet:
 
+- Write the **In Progress marker** (including `run_id`) when a collection starts processing
 - Write updates at least:
   - after each collection finishes, and
   - after every N files within that collection (configurable, e.g., 10)
+- Clear the **In Progress marker** when collection processing completes (success or failure)
 
 If you keep a **local manifest** as the true state, the sheet becomes a reporting/control plane and can lag slightly without harming correctness.
 
@@ -386,7 +391,7 @@ If you keep a **local manifest** as the true state, the sheet becomes a reportin
 
 ## Local state management without a database (recommended baseline)
 
-To avoid a database while maintaining idempotency and fast restarts, create a local “state directory”:
+To avoid a database while maintaining idempotency and fast restarts, create a local "state directory":
 
 ```
 {root}/_state/
@@ -394,18 +399,26 @@ To avoid a database while maintaining idempotency and fast restarts, create a lo
   collections/
     {collection_id}.json
   runs/
-    {timestamp}.json
+    {run_id}.json
 ```
+
+Where `run_id` is a **timestamp-based identifier** (e.g., `20250305-143000-a1b2` derived from ISO8601). This lightweight identifier supports:
+
+- **Audit trail correlation** — ties together all log entries, sheet updates, and per-collection state changes from a specific invocation
+- **Sheet update tracing** — distinguishes "updates from today's 9am run" from "yesterday's interrupted run"
+- **Error context** — helps trace failures back to specific execution context when embedded in logs
 
 Per-collection state JSON should include:
 
+- `run_id` of last successful run (for cross-referencing)
 - last successful checkpoint (store-time/crawl-time)
 - last successful sheet update time
 - a record of recently downloaded filenames (bounded list)
 - failure counters / last error summary
 
-Per-run log JSON should include:
+**Per-run log JSON** (identified by `run_id`, a timestamp-based identifier like `20250305-143000-a1b2`) should include:
 
+- `run_id` — the unique identifier for this script invocation
 - start/end times
 - counts downloaded, bytes, failures
 - list of collections touched
@@ -438,17 +451,18 @@ If you stay no-DB, you can still get most benefits with:
 
 ### Proposed pipeline stages
 
-1. **Load sheet snapshot** → canonical internal records
-2. **Select active collections**
-3. For each collection:
+1. Generate `run_id` (timestamp-based identifier for this invocation)
+2. **Load sheet snapshot** → canonical internal records
+3. **Select active collections**
+4. For each collection:
    1. compute checkpoint
    2. query WASAPI → list of candidate files
-   3. filter to “needs download”
+   3. filter to "needs download"
    4. download + verify + write fixity sidecars
    5. update local manifest
    6. enqueue sheet updates
-4. Flush sheet updates (batched)
-5. Write run summary
+5. Flush sheet updates (batched)
+6. Write run summary (including `run_id`)
 
 ### Trio evolution
 
@@ -468,23 +482,28 @@ This cleanly separates:
 ## Cron concerns (operational hardening)
 
 - Use a lock (e.g., `flock`) so runs do not overlap.
-- Log to a predictable location (and rotate).
-- Emit a concise “run summary” (counts + errors) suitable for email/Slack later.
+- Log to a predictable location (and rotate), with `run_id` in structured log entries
+- Emit a concise "run summary" (counts + errors + `run_id`) suitable for email/Slack later
 - Ensure credentials are available in the cron environment.
 - Make runtime configurable via a config file plus env overrides.
 
 ---
 
 ## Open questions / decisions to resolve before implementation
-1. **Checkpoint semantics (resolved + remaining details)**
+
+1. **Resolved:** In-progress marker format
+   - **Decision:** Include `run_id` in the marker: `In Progress (run: 20250305-143000-a1b2)`
+   - Provides traceability to log files, debugging for stuck collections, audit correlation
+
+2. **Checkpoint semantics (resolved + remaining details)**
    - **Resolved:** discovery uses `store-time` only, with a **30-day overlap window** and filename dedupe.
    - **Remaining:** confirm whether WASAPI’s `store-time-after` behaves strictly-exclusively; keep exclusive semantics in code regardless and rely on dedupe.
    - **Remaining:** define how to surface “record missing store-time” (log only vs sheet flag vs separate report file).
 
-2. **Seed-level tracking**
+3. **Seed-level tracking**
    - Is it required for MVP, or can it be populated later?
 
-3. **Fixity source of truth**
+4. **Fixity source of truth**
    - SHA-256 only locally, or also compare against remote MD5/SHA1 where possible?
 
 4. **File layout**
