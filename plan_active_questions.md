@@ -4,6 +4,22 @@ I like the idea of the `**Option 2: "In Progress" marker**`, below.
 
 Should that marker include the new lightweight-identifier?
 
+**Answer:**
+
+Yes. The in-progress marker should include the `run_id` (lightweight identifier). Here's why:
+
+**Benefits:**
+- **Traceability:** Links the spreadsheet status directly to specific log files and local state (e.g., `run-20250305-143000-a1b2.json`)
+- **Debugging:** If a collection appears "stuck" in progress, staff can identify which run left the marker and check the corresponding logs
+- **Audit correlation:** Enables quick cross-reference between the spreadsheet view and the actual execution context
+
+**Suggested format:**
+```
+In Progress (run: 20250305-143000-a1b2)
+```
+
+This combines human-readable status with the concise identifier from line 400-405 of PLAN__warc_backup_script_v03.md.
+
 ---
 
 
