@@ -11,8 +11,9 @@ from lib.wasapi_discovery import DEFAULT_WASAPI_BASE_URL, WasapiDiscoveryError
 
 dotenv.load_dotenv()
 
+
 LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
-LOG_FILE_PATH: Path = Path('logs') / 'warc_tracker_script.log'
+LOG_FILE_PATH: Path = Path(os.environ['LOG_PATH'])
 
 ## setup logging
 log_level = getattr(logging, LOG_LEVEL)  # maps the string name to the corresponding logging level constant
@@ -27,6 +28,13 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
+
+## prevent httpx from logging
+if log_level <= logging.INFO:
+    for noisy in ('httpx', 'httpcore'):
+        lg = logging.getLogger(noisy)
+        lg.setLevel(logging.WARNING)  # or logging.ERROR if you prefer only errors
+        lg.propagate = False  # don't bubble up to root
 
 
 def run_collection_orchestration(
