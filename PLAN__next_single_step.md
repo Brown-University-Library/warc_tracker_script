@@ -1,4 +1,4 @@
-# Next Single Step: Local WARC and Fixity Path Building
+# Next Single Step: SHA-256 and Fixity Sidecar Writing
 
 ## Context for Future Agents
 
@@ -15,23 +15,23 @@
 - `lib/collection_sheet.py` loads active collection jobs from the spreadsheet.
 - `lib/local_state.py` persists per-collection `state.json`.
 - `lib/wasapi_discovery.py` performs production WASAPI discovery with overlap-window checkpoint logic.
-- `lib/storage_layout.py` now derives year/month partitions from WARC filenames and computes planned WARC/fixity destinations.
-- The production flow currently stops after discovery, checkpoint persistence, planned-path computation, and logging.
+- `lib/storage_layout.py` derives year/month partitions from WARC filenames and computes planned WARC/fixity destinations.
+- `lib/downloader.py` streams WARC files, writes to `*.partial`, removes stale partial files on retry, and atomically renames successful downloads into place.
+- The production flow now reaches actual local WARC download, but it does not yet compute SHA-256 or write fixity sidecars.
 
 ---
 ## Goal of This Step
 
-Implement the first production version of the **downloader** so the existing sequential orchestration flow can move from “planned local destination” to “actual downloaded local WARC file.”
+Implement the first production version of **fixity generation** so the current sequential flow moves from “downloaded local WARC file” to “downloaded WARC plus local SHA-256 artifacts.”
 
-This step should add a small download layer that:
+This step should add a small fixity layer that:
 
-- streams a WARC from Archive-It using `httpx`
-- writes to a `*.partial` file first
-- replaces the final destination atomically on success
-- removes or overwrites stale partial files on retry
+- computes SHA-256 for a successfully downloaded WARC file
+- writes a `{filename}.sha256` sidecar using standard checksum-line format
+- writes a lightweight `{filename}.json` metadata sidecar
 - returns explicit success/failure information to the caller
 
-This step should **not** yet compute SHA-256 sidecars or update spreadsheet state.
+This step should **not** yet update the durable manifest or spreadsheet state.
 
 ---
 ## Why This Is the Right Next Step
@@ -39,76 +39,75 @@ This step should **not** yet compute SHA-256 sidecars or update spreadsheet stat
 1. **It directly follows the updated implementation sequence**
    - Discovery is done.
    - Path planning is done.
-   - The next missing production behavior is the actual download write path.
+   - Downloading is done.
+   - The next missing production behavior is fixity creation.
 
 2. **It fits the existing `main.py`-first flow**
    - `main.py` can remain thin.
-   - `lib/orchestration.py` can call a download helper after path planning, without introducing Trio yet.
+   - `lib/orchestration.py` can call a fixity helper after successful download, without introducing Trio yet.
 
 3. **It preserves a small implementation increment**
-   - Downloading can be validated before adding fixity, manifest mutation, or async worker structure.
+   - Fixity can be validated before adding manifest mutation, spreadsheet writes, or async worker structure.
 
 4. **It reduces risk in the right order**
-   - Correct temp-file and atomic-rename behavior is a core filesystem safety concern.
-   - It is better to validate that before layering in checksums and sheet updates.
+   - Local checksum computation and sidecar writing are core integrity features.
+   - It is better to validate those artifacts before layering in broader state updates.
 
 ---
 ## In-Scope Deliverables
 
-Implement a small production download module, likely one of:
+Implement a small production fixity module, likely one of:
 
-- `warc_tracker_script/lib/downloader.py`
-- or `warc_tracker_script/lib/warc_downloader.py`
+- `warc_tracker_script/lib/fixity.py`
+- or `warc_tracker_script/lib/sha256_sidecar.py`
 
 And add focused tests, likely one of:
 
-- `warc_tracker_script/tests/test_downloader.py`
+- `warc_tracker_script/tests/test_fixity.py`
 
-Update the current sequential orchestration flow so it can, for a small set of valid discovered records:
+Update the current sequential orchestration flow so it can, for successful downloads:
 
-- identify a usable source URL
-- identify the planned local WARC destination path
-- invoke the downloader helper
-- log download success or failure clearly
+- identify the downloaded WARC path
+- identify the planned fixity sidecar paths
+- compute SHA-256 for the downloaded file
+- write `.sha256` and `.json` sidecars
+- log fixity success or failure clearly
 
 ---
 ## Out of Scope for This Step
 
-- No SHA-256 calculation yet.
-- No `.sha256` or `.json` sidecar writing yet.
 - No durable manifest success/failure recording yet.
 - No spreadsheet writes.
 - No Trio concurrency.
 - No broad redesign of `main.py`.
+- No remote checksum comparison.
 
 ---
 ## Required Behavior from the Master Plan
 
-### HTTP behavior
+### Fixity artifacts
 
-Use `httpx` with:
+For each downloaded WARC:
 
-- streaming download
-- reasonable timeout values
-- clear failure behavior on HTTP/network errors
-
-Retry logic can remain minimal in this step if needed.
-
-### File-write behavior
-
-For MVP download handling:
-
-1. download to `*.partial`
-2. on success, rename atomically to the final filename
-3. if interrupted or retried, stale partial files should not corrupt the final target
-
-Do not implement HTTP range-resume in this step.
+1. compute **SHA-256**
+2. write `{filename}.sha256` with standard checksum-line format
+3. write `{filename}.json` with lightweight metadata:
+   - sha256
+   - size
+   - source URL
+   - relevant timestamps
 
 ### Storage behavior
 
-- use the already-planned destination path from `lib/storage_layout.py`
+- use the already-planned sidecar paths from `lib/storage_layout.py`
 - create parent directories as needed
-- do not write fixity artifacts yet
+- do not add BagIt, OCFL, or remote verification in this step
+
+### Failure behavior
+
+- if fixity writing fails, log the failure clearly
+- do not delete a successfully downloaded WARC just because sidecar writing failed
+- avoid leaving misleading partial sidecar content behind when practical
 
 ---
 ## Recommended API Shape
@@ -117,56 +116,44 @@ Keep the module small and explicit. Illustrative shapes:
 
 ```python
 @dataclass(frozen=True)
-class DownloadResult:
+class FixityResult:
     success: bool
-    destination_path: Path
-    partial_path: Path
-    bytes_written: int
-    source_url: str
+    warc_path: Path
+    sha256_path: Path
+    json_path: Path
+    sha256_hexdigest: str | None
+    size: int
     error_message: str | None
 
 
-def build_partial_download_path(destination_path: Path) -> Path:
+def compute_sha256_for_file(file_path: Path, chunk_size: int = 65536) -> str:
     ...
 
 
-def download_to_path(
-    client: httpx.Client,
+def write_fixity_sidecars(
+    warc_path: Path,
+    sha256_path: Path,
+    json_path: Path,
     source_url: str,
-    destination_path: Path,
-    chunk_size: int = 65536,
-) -> DownloadResult:
+) -> FixityResult:
     ...
 ```
 
 Exact naming can vary if the interface stays simple and testable.
 
 ---
-## Source-URL Handling Requirement
-
-The orchestration layer should only attempt a download when a discovered record exposes a usable source URL.
-
-For this step:
-
-- accept the production record field name already present in WASAPI responses
-- if multiple plausible URL field names exist, normalize that in one helper
-- skip records without a usable download URL and log that decision clearly
-
-Do not over-generalize beyond what the current production records require.
-
----
 ## Orchestration Integration Requirement
 
-Extend the current sequential flow in `lib/orchestration.py` so that after discovery and planned-path computation it can:
+Extend the current sequential flow in `lib/orchestration.py` so that after a successful download it can:
 
-1. inspect discovered records for usable filenames and source URLs
-2. pair those records with planned local WARC destinations
-3. call the downloader helper
-4. log success/failure counts clearly
+1. inspect the planned fixity paths for that filename
+2. call the fixity helper
+3. log per-file fixity success/failure
+4. include fixity outcomes in the collection-level summary log if helpful
 
 Do this without turning `main.py` into a logic-heavy script.
 
-If necessary, keep orchestration limited to a small, direct call path rather than introducing a broader job abstraction yet.
+If necessary, keep orchestration limited to a small, direct call path rather than introducing manifest abstractions yet.
 
 ---
 ## Test Requirements
@@ -175,56 +162,53 @@ Add focused `unittest` coverage.
 
 ### Minimum tests to include
 
-- **Partial-path construction**
-  - destination `file.warc.gz` produces `file.warc.gz.partial`
+- **SHA-256 computation happy path**
+  - a known file content produces the expected hexdigest
 
-- **Download happy path**
-  - streamed bytes are written to a partial file
-  - the final file exists after atomic rename
-  - no leftover partial file remains
+- **Checksum sidecar writing**
+  - `{filename}.sha256` is written with standard checksum-line format
 
-- **Existing stale partial handling**
-  - a pre-existing partial file does not break a fresh download attempt
+- **JSON sidecar writing**
+  - `{filename}.json` contains sha256, size, source URL, and timestamps or equivalent relevant metadata used by the implementation
 
-- **HTTP failure behavior**
-  - a failing HTTP response returns or raises a clear error
-  - the final destination is not left in a misleading partial-success state
+- **Fixity failure behavior**
+  - sidecar-writing failure returns or records a clear error
+  - the downloaded WARC file remains in place
 
 - **Orchestration consumption**
-  - the sequential orchestration can invoke the downloader for usable discovered records
-  - records missing a usable source URL are skipped cleanly
+  - the sequential orchestration invokes fixity generation after a successful download
+  - failed downloads do not attempt fixity generation
 
-Keep tests local and mocked; do not add live network tests.
+Keep tests local and mocked where appropriate; do not add live network tests.
 
 ---
 ## Suggested Implementation Notes
 
-- Keep download logic in `lib/`, not in `main.py`.
+- Keep fixity logic in `lib/`, not in `main.py`.
 - Use `pathlib.Path` throughout.
-- Make parent directories before writing.
-- Prefer explicit chunked writes over reading the full response into memory.
+- Prefer chunked hashing over reading the whole file into memory.
+- Use atomic replace for sidecar writes if practical.
 - Match repository style from `AGENTS.md` and `ruff.toml`.
-- Keep return values explicit enough that later steps can add manifest updates and fixity writing without redesigning the downloader.
+- Keep return values explicit enough that later steps can add manifest updates without redesigning the fixity layer.
 
 ---
 ## Success Criteria
 
-- [ ] a production downloader module exists under `lib/`
-- [ ] the downloader streams content with `httpx`
-- [ ] downloads are written to `*.partial` first
-- [ ] successful downloads are atomically renamed into place
-- [ ] stale partial files do not break retries
-- [ ] the sequential orchestration flow can invoke the downloader for usable records
+- [ ] a production fixity module exists under `lib/`
+- [ ] SHA-256 is computed for downloaded WARC files
+- [ ] `.sha256` sidecars are written in checksum-line format
+- [ ] `.json` metadata sidecars are written with lightweight fixity metadata
+- [ ] the sequential orchestration flow invokes fixity generation after successful downloads
+- [ ] failed downloads do not attempt fixity generation
 - [ ] focused `unittest` coverage exists for happy-path, failure, and orchestration behavior
 
 ---
 ## Likely Follow-Up After This Step
 
-After the downloader is implemented and integrated, the next step should likely be:
+After fixity writing is implemented and integrated, the next step should likely be:
 
-1. add SHA-256 calculation and sidecar writing
-2. update local manifest entries for download success/failure
-3. then decide whether spreadsheet updates or Trio worker structure should come next
+1. update local manifest entries for download and fixity success/failure
+2. then decide whether spreadsheet updates or Trio worker structure should come next
 
 ---
 ## Handoff Notes for the Next Agent / New Session
@@ -240,9 +224,10 @@ Quick mental model of the codebase right now:
 - `main.py` is a thin entry point and should stay that way.
 - `lib/orchestration.py` is the current sequential production flow.
 - `lib/wasapi_discovery.py` already returns discovered records and checkpoint info.
-- `lib/storage_layout.py` now maps discovered filenames to deterministic local destinations.
-- The next missing production dependency is the actual download write path.
+- `lib/storage_layout.py` maps discovered filenames to deterministic WARC and fixity destinations.
+- `lib/downloader.py` now performs the safe local WARC write path.
+- The next missing production dependency is SHA-256 and sidecar generation for successfully downloaded files.
 
-The immediate objective is to add the smallest correct downloader layer that plugs into the existing sequential orchestration flow and writes WARC files safely using `*.partial` plus atomic rename.
+The immediate objective is to add the smallest correct fixity layer that plugs into the existing sequential orchestration flow and writes `.sha256` plus `.json` artifacts safely for downloaded WARC files.
 
 ---

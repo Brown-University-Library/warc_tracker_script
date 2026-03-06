@@ -29,17 +29,16 @@ Completed so far:
 - per-collection local `state.json` handling exists in `lib/local_state.py`
 - WASAPI discovery helpers exist in `lib/wasapi_discovery.py`, including `store-time` overlap-window boundary computation, paginated record enumeration, and max `store-time` tracking
 - local WARC/fixity path-building helpers exist in `lib/storage_layout.py`, including year/month partition extraction from WARC filenames and planned destination/sidecar path construction
+- a production downloader exists in `lib/downloader.py`; it streams with `httpx`, writes to `*.partial`, removes stale partial files on retry, atomically renames successful downloads into place, and returns explicit success/failure results
 - a temporary investigative WASAPI metadata-capture script exists in `tmp_inspect_collection_wasapi.py`
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
-- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, and logs pending download candidates
+- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, downloads WARC files sequentially to planned destinations, and logs per-collection download summaries
 - Archive-It credential loading and storage-root resolution exist in `lib/orchestration.py`
-- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, production orchestration helpers, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
+- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, production orchestration helpers, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
 
 Not yet implemented in the production backup flow:
 
-- downloader with temp-file then atomic rename
 - SHA-256/fixity writing
-- Trio orchestration and spreadsheet updater flow
 - durable file-manifest updates beyond the enumeration checkpoint
 - spreadsheet write/update behavior
 - Trio orchestration with two dedicated download workers and a separate sheet updater
@@ -172,6 +171,8 @@ For MVP:
 4. Write fixity sidecar
 5. Update local manifest
 
+The current production code implements steps 1 and 2. Steps 3 through 5 remain to be added.
+
 If interrupted, leave the partial file and delete/retry it on the next run.
 
 Do not implement HTTP range-resume in MVP.
@@ -275,7 +276,7 @@ A human-friendly combined display label such as `w1:filename` or `w2:filename` s
 
 ## Trio architecture: Option 1
 
-The current codebase does **not** implement this Trio architecture yet. The production flow is currently a simpler sequential orchestrator that performs discovery and checkpoint persistence only.
+The current codebase does **not** implement this Trio architecture yet. The production flow is currently a simpler sequential orchestrator that performs discovery, checkpoint persistence, planned-path construction, source-URL extraction, and sequential downloading.
 
 Retain a simple `Trio` design with:
 
@@ -350,7 +351,7 @@ Keep this minimal and practical.
 4. [x] Implement WASAPI discovery helpers with `store-time` plus 30-day overlap.
 5. [x] Integrate sheet ingestion, local state, and WASAPI discovery into the current sequential production orchestration flow.
 6. [x] Implement local path building using the year/month collection layout.
-7. Implement downloader with temp-file then atomic rename.
+7. [x] Implement downloader with temp-file then atomic rename.
 8. Implement SHA-256 sidecar writing.
 9. Implement the `Trio` flow:
    - main orchestrator
