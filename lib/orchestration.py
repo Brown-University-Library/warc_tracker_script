@@ -8,6 +8,7 @@ import httpx
 
 from lib.collection_sheet import CollectionJob
 from lib.downloader import DownloadResult, download_to_path
+from lib.fixity import FixityResult, write_fixity_sidecars
 from lib.local_state import load_collection_state, save_collection_state
 from lib.storage_layout import PlannedCollectionPaths, StorageLayoutError, plan_collection_paths
 from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collection_discovery
@@ -31,6 +32,7 @@ class PlannedDownload:
 def get_downloaded_storage_root() -> Path:
     """
     Returns the configured local storage root.
+    Called by: process_collection_job()
     """
     configured_storage_root = os.getenv('WARC_STORAGE_ROOT')
     result = DEFAULT_STORAGE_ROOT
@@ -42,6 +44,7 @@ def get_downloaded_storage_root() -> Path:
 def get_archive_it_credentials() -> tuple[str, str] | None:
     """
     Returns Archive-It credentials from the environment when available.
+    Called by: process_collection_job()
     """
     username = os.getenv('ARCHIVEIT_WASAPI_USERNAME') or os.getenv('ARCHIVEIT_USER')
     password = os.getenv('ARCHIVEIT_WASAPI_PASSWORD') or os.getenv('ARCHIVEIT_PASS')
@@ -54,6 +57,7 @@ def get_archive_it_credentials() -> tuple[str, str] | None:
 def count_pending_download_candidates(discovered_records: list[dict[str, object]], state: dict[str, object]) -> int:
     """
     Counts discovered records that do not yet have a downloaded status in local state.
+    Called by: process_collection_job()
     """
     files_state = state.get('files')
     known_files = files_state if isinstance(files_state, dict) else {}
@@ -76,6 +80,7 @@ def build_planned_download_paths(
 ) -> list[PlannedCollectionPaths]:
     """
     Builds planned local WARC and fixity destinations for discovered records with usable filenames.
+    Called by: process_collection_job()
     """
     planned_paths: list[PlannedCollectionPaths] = []
     for record in discovered_records:
@@ -97,6 +102,7 @@ def build_planned_download_paths(
 def get_record_source_url(record: dict[str, object]) -> str | None:
     """
     Returns the first usable download URL from one discovered record.
+    Called by: build_planned_downloads()
     """
     url_candidates: list[object] = []
     locations_value = record.get('locations')
@@ -123,6 +129,7 @@ def build_planned_downloads(
 ) -> list[PlannedDownload]:
     """
     Builds planned download inputs for records that have both a usable filename and source URL.
+    Called by: process_collection_job()
     """
     result: list[PlannedDownload] = []
     for record in discovered_records:
@@ -162,6 +169,7 @@ def build_planned_downloads(
 def log_planned_download_paths(collection_id: int, planned_paths: list[PlannedCollectionPaths]) -> None:
     """
     Logs the planned local WARC and fixity destinations for discovered records.
+    Called by: process_collection_job()
     """
     for planned_path in planned_paths:
         log.info(
@@ -175,12 +183,16 @@ def log_planned_download_paths(collection_id: int, planned_paths: list[PlannedCo
 
 
 def run_planned_downloads(
-    client: httpx.Client, collection_id: int, planned_downloads: list[PlannedDownload]
-) -> list[DownloadResult]:
+    client: httpx.Client,
+    collection_id: int,
+    planned_downloads: list[PlannedDownload],
+) -> tuple[list[DownloadResult], list[FixityResult]]:
     """
-    Downloads planned WARC files sequentially and returns the per-file results.
+    Downloads planned WARC files sequentially, generates fixity for successful downloads, and returns the per-file results.
+    Called by: process_collection_job()
     """
     results: list[DownloadResult] = []
+    fixity_results: list[FixityResult] = []
     for planned_download in planned_downloads:
         destination_path = planned_download.planned_paths.warc_path
         if destination_path.exists():
@@ -202,6 +214,28 @@ def run_planned_downloads(
                 planned_download.filename,
                 download_result.destination_path,
             )
+            fixity_result = write_fixity_sidecars(
+                warc_path=download_result.destination_path,
+                sha256_path=planned_download.planned_paths.sha256_path,
+                json_path=planned_download.planned_paths.json_path,
+                source_url=planned_download.source_url,
+            )
+            fixity_results.append(fixity_result)
+            if fixity_result.success:
+                log.info(
+                    'Collection %s wrote fixity sidecars for %s: sha256=%s json=%s',
+                    collection_id,
+                    planned_download.filename,
+                    fixity_result.sha256_path,
+                    fixity_result.json_path,
+                )
+            else:
+                log.error(
+                    'Collection %s fixity writing failed for %s: %s',
+                    collection_id,
+                    planned_download.filename,
+                    fixity_result.error_message,
+                )
         else:
             log.error(
                 'Collection %s download failed for %s from %s: %s',
@@ -210,7 +244,8 @@ def run_planned_downloads(
                 planned_download.source_url,
                 download_result.error_message,
             )
-    return results
+    result = (results, fixity_results)
+    return result
 
 
 def log_collection_download_summary(
@@ -218,21 +253,27 @@ def log_collection_download_summary(
     pending_download_count: int,
     planned_download_count: int,
     download_results: list[DownloadResult],
+    fixity_results: list[FixityResult],
 ) -> None:
     """
     Logs a summary of download activity for one collection.
+    Called by: process_collection_job()
     """
     success_count = sum(1 for result in download_results if result.success)
     failure_count = sum(1 for result in download_results if not result.success)
     skipped_count = planned_download_count - len(download_results)
+    fixity_success_count = sum(1 for result in fixity_results if result.success)
+    fixity_failure_count = sum(1 for result in fixity_results if not result.success)
     log.info(
-        'Collection %s has %s pending candidates, %s planned downloads, %s successes, %s failures, and %s skipped existing files.',
+        'Collection %s has %s pending candidates, %s planned downloads, %s download successes, %s download failures, %s skipped existing files, %s fixity successes, and %s fixity failures.',
         collection_job.collection_id,
         pending_download_count,
         planned_download_count,
         success_count,
         failure_count,
         skipped_count,
+        fixity_success_count,
+        fixity_failure_count,
     )
     log.info('Collection %s spreadsheet progress updates are not implemented yet.', collection_job.collection_id)
 
@@ -245,6 +286,7 @@ def process_collection_job(
 ) -> None:
     """
     Processes one collection through the implemented sequential orchestration stages.
+    Called by: run_collection_orchestration()
     """
     state = load_collection_state(storage_root, collection_job.collection_id)
     checkpoint_store_time_max = state.get('enumeration_checkpoint_store_time_max')
@@ -283,5 +325,11 @@ def process_collection_job(
     planned_paths = build_planned_download_paths(storage_root, collection_job.collection_id, discovery_result.records)
     log_planned_download_paths(collection_job.collection_id, planned_paths)
     planned_downloads = build_planned_downloads(storage_root, collection_job.collection_id, discovery_result.records)
-    download_results = run_planned_downloads(client, collection_job.collection_id, planned_downloads)
-    log_collection_download_summary(collection_job, pending_download_count, len(planned_downloads), download_results)
+    download_results, fixity_results = run_planned_downloads(client, collection_job.collection_id, planned_downloads)
+    log_collection_download_summary(
+        collection_job,
+        pending_download_count,
+        len(planned_downloads),
+        download_results,
+        fixity_results,
+    )

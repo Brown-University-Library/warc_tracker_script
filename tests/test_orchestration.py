@@ -11,6 +11,7 @@ import httpx
 sys.path.append(str(Path(__file__).parent.parent))
 
 from lib.collection_sheet import CollectionJob
+from lib.fixity import FixityResult
 from lib.orchestration import (
     build_planned_download_paths,
     build_planned_downloads,
@@ -207,6 +208,17 @@ class TestProcessCollectionJob(TestCase):
         download_result.success = True
         download_result.bytes_written = 11
         download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        fixity_result = FixityResult(
+            success=True,
+            warc_path=download_result.destination_path,
+            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_hexdigest='abc123',
+            size=11,
+            source_url='https://example.org/alpha.warc.gz',
+            completed_at='2026-03-06T12:34:56+00:00',
+            error_message=None,
+        )
 
         with (
             patch(
@@ -219,6 +231,7 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
             patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
             patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
+            patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result) as mock_fixity,
             patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
         ):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
@@ -229,8 +242,10 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_download.call_count, 1)
+        self.assertEqual(mock_fixity.call_count, 1)
         self.assertEqual(mock_log_summary.call_args.args[1], 1)
         self.assertEqual(mock_log_summary.call_args.args[2], 1)
+        self.assertEqual(mock_log_summary.call_args.args[4], [fixity_result])
 
     def test_skips_checkpoint_save_when_discovery_not_complete(self):
         """
@@ -258,6 +273,17 @@ class TestProcessCollectionJob(TestCase):
         download_result.success = True
         download_result.bytes_written = 11
         download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        fixity_result = FixityResult(
+            success=True,
+            warc_path=download_result.destination_path,
+            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_hexdigest='abc123',
+            size=11,
+            source_url='https://example.org/alpha.warc.gz',
+            completed_at='2026-03-06T12:34:56+00:00',
+            error_message=None,
+        )
 
         with (
             patch(
@@ -270,6 +296,7 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
             patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
             patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
+            patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result) as mock_fixity,
             patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
         ):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
@@ -279,8 +306,59 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_download.call_count, 1)
+        self.assertEqual(mock_fixity.call_count, 1)
         self.assertEqual(mock_log_summary.call_args.args[1], 1)
         self.assertEqual(mock_log_summary.call_args.args[2], 1)
+        self.assertEqual(mock_log_summary.call_args.args[4], [fixity_result])
+
+    def test_failed_download_does_not_attempt_fixity_generation(self):
+        """
+        Checks that failed downloads do not invoke fixity generation.
+        """
+        collection_job = CollectionJob(
+            collection_id=123,
+            repository='UA',
+            collection_url='https://example.com',
+            collection_name='Example',
+            row_number=7,
+        )
+        client = MagicMock(spec=httpx.Client)
+        discovery_result = MagicMock()
+        discovery_result.records = [
+            {
+                'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+                'locations': ['https://example.org/alpha.warc.gz'],
+            }
+        ]
+        discovery_result.request_records = [{'page': 1}]
+        discovery_result.completed_successfully = True
+        discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+        download_result = MagicMock()
+        download_result.success = False
+        download_result.bytes_written = 0
+        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.error_message = '404 Not Found'
+
+        with (
+            patch(
+                'lib.orchestration.load_collection_state',
+                return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
+            ),
+            patch('lib.orchestration.compute_store_time_after_datetime') as mock_compute,
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
+            patch('lib.orchestration.save_collection_state'),
+            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']),
+            patch('lib.orchestration.log_planned_download_paths'),
+            patch('lib.orchestration.download_to_path', return_value=download_result),
+            patch('lib.orchestration.write_fixity_sidecars') as mock_fixity,
+            patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
+        ):
+            mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
+            process_collection_job(client, collection_job, Path('/tmp/storage'), 'https://example.org/wasapi')
+
+        self.assertFalse(mock_fixity.called)
+        self.assertEqual(mock_log_summary.call_args.args[3], [download_result])
+        self.assertEqual(mock_log_summary.call_args.args[4], [])
 
 
 if __name__ == '__main__':
