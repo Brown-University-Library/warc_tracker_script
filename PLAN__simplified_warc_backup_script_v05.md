@@ -9,10 +9,11 @@ Build a **cron-triggered, idempotent** Python script that:
 4. Writes local **SHA-256 fixity** data for each downloaded file.
 5. Updates the tracking spreadsheet at a small number of key checkpoints.
 
-This version intentionally keeps the design simple while preserving a **2-concurrent-process Trio flow**:
+This version intentionally keeps the design simple while preserving a small `Trio` concurrency model with **two dedicated download workers** and a **separate sheet updater**:
 
-- **Process 1:** collection discovery + file download work
-- **Process 2:** spreadsheet update worker
+- **Download worker 1:** downloads files from a shared job queue
+- **Download worker 2:** downloads files from a shared job queue
+- **Sheet updater:** writes spreadsheet progress and summary updates
 
 The local filesystem state is the source of truth. The spreadsheet is mainly a reporting and control surface.
 
@@ -24,7 +25,7 @@ The local filesystem state is the source of truth. The spreadsheet is mainly a r
 - Overlap window: **30 days**
 - Dedup / retry basis: **local manifest keyed by filename**
 - File type for MVP: **WARC only**
-- Concurrency model: **Trio with 2 concurrent processes**
+- Concurrency model: **Trio with 2 dedicated download workers + 1 sheet updater**
 - Database: **no database for MVP**
 - Spreadsheet role: **reporting/control, not correctness**
 
@@ -187,16 +188,23 @@ No BagIt, OCFL, or remote checksum comparison in MVP.
 
 ## Spreadsheet updates
 
-Keep spreadsheet writes minimal.
+Keep spreadsheet writes more frequent than the prior simplified draft, but still controlled.
 
 ### When to write
 For each collection:
 
 1. Write an **In Progress** marker when processing begins.
-2. Write a final summary update when processing finishes.
-3. Clear the In Progress marker at the end.
+2. Write progress updates during downloading.
+3. Write a final summary update when processing finishes.
+4. Clear the In Progress marker at the end.
 
-That is enough for MVP.
+For MVP, progress updates should be triggered by completed downloads and flushed in small batches, for example:
+
+- after each completed file, or
+- after every small batch of completed files, or
+- after a short time interval if downloads are still in progress
+
+This gives better visibility without making the sheet the source of truth.
 
 ### What to write
 At collection level, update only a small set of fields if present:
@@ -212,7 +220,7 @@ The sheet updater should:
 
 - batch writes where practical
 - retry on `429` with backoff
-- avoid per-file writes unless later proven necessary
+- allow frequent progress writes, but coalesce them when several download events arrive close together
 
 ---
 
@@ -231,38 +239,53 @@ Optionally generate a simple `run_id` for logging and sheet traceability, but do
 
 ---
 
-## Trio architecture: keep 2 concurrent processes
+## Trio architecture: Option 1
 
-Retain a simple `Trio` design with exactly two concurrent processes/tasks:
+Retain a simple `Trio` design with:
 
-### Process 1: collection worker
-This process:
+- **two dedicated download workers**
+- **one separate sheet-updater task**
+- **one main orchestrator** that performs sheet ingestion, collection selection, WASAPI discovery, and job submission
+
+### Main orchestrator
+This task:
 
 1. loads sheet data
 2. selects active collections
 3. processes collections one at a time
 4. queries WASAPI
 5. decides what needs download
-6. downloads files
-7. updates local state
-8. sends spreadsheet update events to Process 2
+6. submits download jobs to a shared queue
+7. receives completion information from download workers
+8. updates local state
+9. sends spreadsheet update events to the sheet updater
 
-### Process 2: sheet updater
-This process:
+### Download worker 1 and Download worker 2
+Each worker:
 
-1. receives update events from Process 1
+1. receives a file-download job from the shared queue
+2. downloads to `*.partial`
+3. renames atomically on success
+4. computes SHA-256 and writes fixity sidecars
+5. emits a success or failure event back to the orchestrator
+
+### Sheet updater
+This task:
+
+1. receives update events from the orchestrator
 2. batches writes where appropriate
 3. rate-limits and retries spreadsheet writes
-4. records final collection-level status updates
+4. records start, progress, and final collection-level status updates
 
 ### Why this is enough
 This preserves the main benefit of concurrency:
 
-- file/network work can continue while sheet writes are paced separately
+- up to two files can download concurrently
+- sheet writes are paced separately from download throughput
 
 But it avoids the extra complexity of:
 
-- multiple download workers
+- larger worker pools
 - per-collection nurseries
 - separate limiters for several work types
 - richer event taxonomies than are needed for MVP
@@ -291,8 +314,10 @@ Keep this minimal and practical.
 5. Implement local path building using the simple collection layout.
 6. Implement downloader with temp-file then atomic rename.
 7. Implement SHA-256 sidecar writing.
-8. Implement the 2-process Trio flow:
-   - collection worker
+8. Implement the `Trio` flow:
+   - main orchestrator
+   - download worker 1
+   - download worker 2
    - sheet updater
 9. Add lock, logging, and cron wrapper.
 10. Run on a small set of collections before scaling up.
