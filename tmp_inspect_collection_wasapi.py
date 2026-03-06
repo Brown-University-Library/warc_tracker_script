@@ -389,7 +389,7 @@ def parse_args() -> argparse.Namespace:
     Parses CLI arguments for the investigative script.
     """
     parser = argparse.ArgumentParser(description='Capture Archive-It WASAPI metadata for one collection.')
-    parser.add_argument('collection_id', type=int, help='Archive-It collection id to inspect')
+    parser.add_argument('--collection-id', required=True, type=int, help='Archive-It collection id to inspect')
     parser.add_argument('--output-dir', required=True, help='Directory under which capture output should be created')
     parser.add_argument('--log-level', default=os.getenv('LOG_LEVEL', 'INFO'), help='Logging level')
     parser.add_argument(
