@@ -4,25 +4,36 @@
 
 ### store-time and lookback
 
-One of the first steps will be to determine what files to download. I'll know, from a tracking-spreadsheet, which Collections are still "Active" and some sort of date associate with them. Some common dates associated with WARC files:
-crawl-start-time, crawl-time, and store-time. The store-time can be many days after the crawl-start-time. My plan is to focus exclusively on store-time. I'm assuming the digital-preservation team has their own interface for tracking crawls. The purpose of this script, and its associated tracking-spreadsheet, is to track the backup process. 
+- One of the first steps is determining which WARC files need download for each active collection listed in the tracking spreadsheet.
 
-Therefore, I'll use logic something like:
-- For an active Collection, look at the last-stored-time of a backed-up WARC file.
-- Look for _new_ WARC files to back up after the last-stored-time -- minus one-month.
+- WASAPI exposes several timestamps, including `crawl-start-time`, `crawl-time`, and `store-time`. This script uses only `store-time` for discovery and checkpointing.
 
-Why the one-month lookback?
+- That choice is intentional: `store-time` reflects when the WARC is actually available in WASAPI, and it can be later than the crawl-related timestamps. Since this script is about backup tracking rather than crawl tracking, `store-time` is the safest single clock to follow.
 
-Here's an example...
+- The per-collection local state stores one checkpoint value:
+  - `enumeration_checkpoint_store_time_max`
 
-Let's say I need to backup three WARC files with stored-dates (I'll use dates instead of timestamps for the example):
-- Feb-02
-- Feb-04
-- Feb-06
+- On each run, the script:
+  - reads that saved checkpoint
+  - subtracts 30 days from it
+  - queries WASAPI with `store-time-after=<checkpoint minus 30 days>`
 
-Let's say they're all being downloaded, but some network-issue prevents the Feb-04 file from being backed up. If I just save Feb-06 as my last-stored-time -- the next time I run my script I won't try to re-download the Feb-04 file. 
+- On a first run, when no checkpoint exists yet, the script uses `now` as the reference point and still subtracts 30 days.
 
-But if I say: Look for new files downloaded since Feb-06 with a one-month lookback -- that would catch the missing Feb-04 file.
+- Why keep the 30-day overlap window?
+
+- The overlap protects against incomplete or interrupted enumeration and download work.
+
+- Example:
+
+  - a run sees files with `store-time` values of Feb-02, Feb-04, and Feb-06
+  - the script successfully enumerates all three files
+  - but a later step fails before every needed file is downloaded or before all local state is updated as intended
+
+- If the next run queried only for files strictly after Feb-06, it could miss a file that should still be retried.
+
+- By querying again from 30 days before the saved checkpoint, the script deliberately re-sees a recent slice of already-known records. That overlap is then made safe by local filename-based state and deduplication logic.
+
+- In short, the 30-day window is a recovery buffer: it reduces the chance that a partial run or transient failure causes the script to permanently skip a WARC that should have been backed up.
 
 ---
-
