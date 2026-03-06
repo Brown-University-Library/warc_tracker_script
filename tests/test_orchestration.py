@@ -13,9 +13,11 @@ sys.path.append(str(Path(__file__).parent.parent))
 from lib.collection_sheet import CollectionJob
 from lib.orchestration import (
     build_planned_download_paths,
+    build_planned_downloads,
     count_pending_download_candidates,
     get_archive_it_credentials,
     get_downloaded_storage_root,
+    get_record_source_url,
     process_collection_job,
 )
 
@@ -134,6 +136,46 @@ class TestBuildPlannedDownloadPaths(TestCase):
         self.assertTrue(mock_log_exception.called)
 
 
+class TestDownloadPlanningHelpers(TestCase):
+    """
+    Test cases for source-url extraction and download planning.
+    """
+
+    def test_get_record_source_url_prefers_locations(self):
+        """
+        Checks that source-url extraction uses the first usable locations entry.
+        """
+        record = {
+            'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+            'locations': ['https://example.org/alpha.warc.gz', 'https://example.org/alpha-backup.warc.gz'],
+            'url': 'https://example.org/fallback.warc.gz',
+        }
+
+        result = get_record_source_url(record)
+
+        self.assertEqual(result, 'https://example.org/alpha.warc.gz')
+
+    def test_build_planned_downloads_skips_records_without_source_url(self):
+        """
+        Checks that only records with both filename and usable source URL become planned downloads.
+        """
+        discovered_records = [
+            {
+                'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+                'locations': ['https://example.org/alpha.warc.gz'],
+            },
+            {
+                'filename': 'ARCHIVEIT-123-20260306123556-00000-beta.warc.gz',
+            },
+        ]
+
+        result = build_planned_downloads(Path('/tmp/storage'), 123, discovered_records)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].filename, 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz')
+        self.assertEqual(result[0].source_url, 'https://example.org/alpha.warc.gz')
+
+
 class TestProcessCollectionJob(TestCase):
     """
     Test cases for per-collection orchestration.
@@ -152,10 +194,19 @@ class TestProcessCollectionJob(TestCase):
         )
         client = MagicMock(spec=httpx.Client)
         discovery_result = MagicMock()
-        discovery_result.records = [{'filename': 'alpha.warc.gz'}]
+        discovery_result.records = [
+            {
+                'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+                'locations': ['https://example.org/alpha.warc.gz'],
+            }
+        ]
         discovery_result.request_records = [{'page': 1}]
         discovery_result.completed_successfully = True
         discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+        download_result = MagicMock()
+        download_result.success = True
+        download_result.bytes_written = 11
+        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
 
         with (
             patch(
@@ -167,7 +218,8 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.save_collection_state') as mock_save,
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
             patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
-            patch('lib.orchestration.log_not_yet_implemented_stages') as mock_log_stub,
+            patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
+            patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
         ):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
             process_collection_job(client, collection_job, Path('/tmp/storage'), 'https://example.org/wasapi')
@@ -176,8 +228,9 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(saved_state['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
-        self.assertEqual(mock_log_stub.call_args.args[1], 1)
-        self.assertEqual(mock_log_stub.call_args.args[2], 1)
+        self.assertEqual(mock_download.call_count, 1)
+        self.assertEqual(mock_log_summary.call_args.args[1], 1)
+        self.assertEqual(mock_log_summary.call_args.args[2], 1)
 
     def test_skips_checkpoint_save_when_discovery_not_complete(self):
         """
@@ -192,10 +245,19 @@ class TestProcessCollectionJob(TestCase):
         )
         client = MagicMock(spec=httpx.Client)
         discovery_result = MagicMock()
-        discovery_result.records = [{'filename': 'alpha.warc.gz'}]
+        discovery_result.records = [
+            {
+                'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+                'locations': ['https://example.org/alpha.warc.gz'],
+            }
+        ]
         discovery_result.request_records = [{'page': 1}]
         discovery_result.completed_successfully = False
         discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+        download_result = MagicMock()
+        download_result.success = True
+        download_result.bytes_written = 11
+        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
 
         with (
             patch(
@@ -207,7 +269,8 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.save_collection_state') as mock_save,
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
             patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
-            patch('lib.orchestration.log_not_yet_implemented_stages') as mock_log_stub,
+            patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
+            patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
         ):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
             process_collection_job(client, collection_job, Path('/tmp/storage'), 'https://example.org/wasapi')
@@ -215,8 +278,9 @@ class TestProcessCollectionJob(TestCase):
         self.assertFalse(mock_save.called)
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
-        self.assertEqual(mock_log_stub.call_args.args[1], 1)
-        self.assertEqual(mock_log_stub.call_args.args[2], 1)
+        self.assertEqual(mock_download.call_count, 1)
+        self.assertEqual(mock_log_summary.call_args.args[1], 1)
+        self.assertEqual(mock_log_summary.call_args.args[2], 1)
 
 
 if __name__ == '__main__':

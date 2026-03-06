@@ -1,11 +1,13 @@
 import logging
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 
 from lib.collection_sheet import CollectionJob
+from lib.downloader import DownloadResult, download_to_path
 from lib.local_state import load_collection_state, save_collection_state
 from lib.storage_layout import PlannedCollectionPaths, StorageLayoutError, plan_collection_paths
 from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collection_discovery
@@ -13,6 +15,17 @@ from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collec
 DEFAULT_STORAGE_ROOT: Path = Path(__file__).resolve().parent.parent / 'storage'
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PlannedDownload:
+    """
+    Represents one discovered record that can be downloaded to a planned local path.
+    """
+
+    filename: str
+    source_url: str
+    planned_paths: PlannedCollectionPaths
 
 
 def get_downloaded_storage_root() -> Path:
@@ -81,6 +94,71 @@ def build_planned_download_paths(
     return result
 
 
+def get_record_source_url(record: dict[str, object]) -> str | None:
+    """
+    Returns the first usable download URL from one discovered record.
+    """
+    url_candidates: list[object] = []
+    locations_value = record.get('locations')
+    if isinstance(locations_value, list):
+        url_candidates.extend(locations_value)
+
+    for field_name in ('location', 'url'):
+        field_value = record.get(field_name)
+        if field_value is not None:
+            url_candidates.append(field_value)
+
+    result: str | None = None
+    for candidate in url_candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            result = candidate.strip()
+            break
+    return result
+
+
+def build_planned_downloads(
+    storage_root: Path,
+    collection_id: int,
+    discovered_records: list[dict[str, object]],
+) -> list[PlannedDownload]:
+    """
+    Builds planned download inputs for records that have both a usable filename and source URL.
+    """
+    result: list[PlannedDownload] = []
+    for record in discovered_records:
+        filename_value = record.get('filename')
+        if not isinstance(filename_value, str) or not filename_value.strip():
+            continue
+
+        source_url = get_record_source_url(record)
+        if source_url is None:
+            log.info(
+                'Collection %s skipping record %s because no usable source URL was present.',
+                collection_id,
+                filename_value,
+            )
+            continue
+
+        try:
+            planned_paths = plan_collection_paths(storage_root, collection_id, filename_value)
+        except StorageLayoutError:
+            log.exception(
+                'Collection %s record filename could not be mapped to the local storage layout: %s',
+                collection_id,
+                filename_value,
+            )
+            continue
+
+        result.append(
+            PlannedDownload(
+                filename=filename_value,
+                source_url=source_url,
+                planned_paths=planned_paths,
+            )
+        )
+    return result
+
+
 def log_planned_download_paths(collection_id: int, planned_paths: list[PlannedCollectionPaths]) -> None:
     """
     Logs the planned local WARC and fixity destinations for discovered records.
@@ -96,24 +174,67 @@ def log_planned_download_paths(collection_id: int, planned_paths: list[PlannedCo
         )
 
 
-def log_not_yet_implemented_stages(
+def run_planned_downloads(
+    client: httpx.Client, collection_id: int, planned_downloads: list[PlannedDownload]
+) -> list[DownloadResult]:
+    """
+    Downloads planned WARC files sequentially and returns the per-file results.
+    """
+    results: list[DownloadResult] = []
+    for planned_download in planned_downloads:
+        destination_path = planned_download.planned_paths.warc_path
+        if destination_path.exists():
+            log.info(
+                'Collection %s skipping download for %s because the destination already exists: %s',
+                collection_id,
+                planned_download.filename,
+                destination_path,
+            )
+            continue
+
+        download_result = download_to_path(client, planned_download.source_url, destination_path)
+        results.append(download_result)
+        if download_result.success:
+            log.info(
+                'Collection %s downloaded %s bytes for %s to %s',
+                collection_id,
+                download_result.bytes_written,
+                planned_download.filename,
+                download_result.destination_path,
+            )
+        else:
+            log.error(
+                'Collection %s download failed for %s from %s: %s',
+                collection_id,
+                planned_download.filename,
+                planned_download.source_url,
+                download_result.error_message,
+            )
+    return results
+
+
+def log_collection_download_summary(
     collection_job: CollectionJob,
     pending_download_count: int,
-    planned_path_count: int,
+    planned_download_count: int,
+    download_results: list[DownloadResult],
 ) -> None:
     """
-    Logs the planned but not-yet-implemented stages for one collection.
+    Logs a summary of download activity for one collection.
     """
+    success_count = sum(1 for result in download_results if result.success)
+    failure_count = sum(1 for result in download_results if not result.success)
+    skipped_count = planned_download_count - len(download_results)
     log.info(
-        'Collection %s has %s pending download candidates and %s planned local path mappings; download queue submission is not implemented yet.',
+        'Collection %s has %s pending candidates, %s planned downloads, %s successes, %s failures, and %s skipped existing files.',
         collection_job.collection_id,
         pending_download_count,
-        planned_path_count,
+        planned_download_count,
+        success_count,
+        failure_count,
+        skipped_count,
     )
-    log.info(
-        'Collection %s spreadsheet progress updates are not implemented yet.',
-        collection_job.collection_id,
-    )
+    log.info('Collection %s spreadsheet progress updates are not implemented yet.', collection_job.collection_id)
 
 
 def process_collection_job(
@@ -161,4 +282,6 @@ def process_collection_job(
     pending_download_count = count_pending_download_candidates(discovery_result.records, state)
     planned_paths = build_planned_download_paths(storage_root, collection_job.collection_id, discovery_result.records)
     log_planned_download_paths(collection_job.collection_id, planned_paths)
-    log_not_yet_implemented_stages(collection_job, pending_download_count, len(planned_paths))
+    planned_downloads = build_planned_downloads(storage_root, collection_job.collection_id, discovery_result.records)
+    download_results = run_planned_downloads(client, collection_job.collection_id, planned_downloads)
+    log_collection_download_summary(collection_job, pending_download_count, len(planned_downloads), download_results)
