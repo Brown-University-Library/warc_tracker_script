@@ -1,4 +1,4 @@
-# Next Single Step: Implement Per-Collection Local `state.json` Management
+# Next Single Step: Production WASAPI Discovery with `store-time` Overlap
 
 ## Context for Future Agents
 
@@ -8,246 +8,258 @@
 
 **Current implementation status**:
 
-- Spreadsheet ingestion is already implemented in `warc_tracker_script/lib/collection_sheet.py`.
-- The temporary WASAPI inspection script already exists in `warc_tracker_script/tmp_inspect_collection_wasapi.py`.
-- Tests already exist for sheet parsing and the temporary WASAPI inspection helpers.
-- `main.py` is still minimal and currently only loads active collection jobs from the spreadsheet.
-- The next missing production building block in the v05 implementation sequence is per-collection local state.
+- Spreadsheet ingestion is implemented in `warc_tracker_script/lib/collection_sheet.py`.
+- Per-collection local state is implemented in `warc_tracker_script/lib/local_state.py`.
+- The temporary investigative WASAPI metadata script exists in `warc_tracker_script/tmp_inspect_collection_wasapi.py`.
+- `main.py` is still intentionally small and should remain thin.
 
 **Important current code facts**:
 
-- The project uses Python `3.12` per repository instructions.
-- Use `unittest`, not `pytest`.
-- Use single quotes and stay within `ruff.toml` line-length guidance.
-- The local filesystem is the source of truth for the backup workflow.
+- The production backup flow still does **not** have a WASAPI discovery module.
+- The local-state module already persists `enumeration_checkpoint_store_time_max` and a filename-keyed `files` mapping.
+- Tests use `unittest`.
+- HTTP work must use `httpx`.
 
 ---
 ## Goal of This Step
 
-Implement the first production version of **per-collection local `state.json` handling** so later steps can rely on stable local checkpoint and retry state.
+Implement the first production version of **WASAPI discovery** for a single collection using:
 
-This step should create code and tests for a small library module that can:
+- `store-time` as the only discovery clock
+- the saved local checkpoint from `state.json`
+- the required 30-day overlap window
 
-- compute the per-collection state-file path
-- create an in-memory default state structure when no file exists
-- load existing `state.json` safely from disk
-- write updated state atomically back to disk
-- preserve the minimum fields required by the v05 plan
+This step should produce code and tests for a small library module that can:
 
-This step should **not** yet implement downloader logic or full WASAPI orchestration.
+- compute the `store-time-after` boundary from local state
+- request paginated WASAPI results for one collection
+- collect record metadata needed for later download decisions
+- determine the maximum observed `store-time` from a successful enumeration
+- leave checkpoint persistence decisions explicit for callers
+
+This step should **not** yet implement actual WARC downloads.
 
 ---
 ## Why This Is the Right Next Step
 
-1. **It matches the v05 implementation order**
-   - The plan sequence puts local `state.json` immediately after spreadsheet ingestion.
-   - Spreadsheet ingestion is already done.
+1. **It directly follows the v05 implementation order**
+   - Spreadsheet ingestion is done.
+   - Local state is done.
+   - Production WASAPI discovery is the next missing dependency.
 
-2. **It unlocks the next production steps cleanly**
-   - WASAPI discovery needs a persisted checkpoint.
-   - Retry and dedupe behavior need a persisted filename manifest.
+2. **It unlocks later downloader work**
+   - The downloader cannot decide what to fetch until discovery returns candidate WARC records.
 
-3. **It keeps scope narrow but production-relevant**
-   - This is a small, testable library step.
-   - It avoids prematurely mixing filesystem state, networking, and concurrency into one change.
+3. **It keeps the architecture clean**
+   - WASAPI logic belongs in `lib/` and can stay independent from `main.py`, Trio orchestration, and spreadsheet updates.
 
-4. **It establishes the source-of-truth model early**
-   - The v05 plan explicitly says the local filesystem is authoritative.
-   - A stable state-file contract should exist before downloader and orchestrator code accumulate assumptions around it.
+4. **It exercises the real checkpoint rule**
+   - This is the first production step that actually uses the persisted local state as intended.
 
 ---
 ## In-Scope Deliverables
 
-Implement a new production library module, likely something like:
+Implement a production discovery module, likely:
 
-- `warc_tracker_script/lib/local_state.py`
+- `warc_tracker_script/lib/wasapi_discovery.py`
 
-And add focused tests, likely something like:
+And add focused tests, likely:
 
-- `warc_tracker_script/tests/test_local_state.py`
+- `warc_tracker_script/tests/test_wasapi_discovery.py`
 
 The module should provide helpers for:
 
-- building the collection root path
-- building the `state.json` path
-- loading state from disk
-- returning a default state when no file exists
-- writing state atomically
+- computing the overlap-window query boundary
+- parsing/validating relevant WASAPI record fields
+- fetching paginated JSON for one collection
+- extracting the maximum usable `store-time`
 
 ---
 ## Out of Scope for This Step
 
-- No WASAPI HTTP requests.
-- No downloader implementation.
-- No fixity hashing.
+- No WARC payload downloads.
+- No fixity generation.
+- No local year/month path creation.
 - No spreadsheet writes.
 - No Trio concurrency.
-- No lock/cron wrapper work.
-- No end-to-end orchestration in `main.py` beyond, at most, tiny non-invasive integration if absolutely needed.
+- No broad orchestration rewrite in `main.py`.
 
 ---
-## Required State Shape for MVP
+## Required Behavior from the v05 Plan
 
-The state structure should stay minimal and aligned with the v05 plan.
+### Query-boundary rule
 
-At minimum, support:
+For each collection:
 
-- `enumeration_checkpoint_store_time_max`
-- `files`
+1. read `enumeration_checkpoint_store_time_max` from local state
+2. if missing, treat the run as a first run and use `now` as the reference point
+3. compute `after_datetime = reference_checkpoint - 30 days`
+4. query WASAPI with `store-time-after=<after_datetime>`
 
-The `files` mapping should be keyed by filename and allow values such as:
+### Discovery clock rule
 
-- `status`
-- `last_attempt_at`
-- `error_count`
-- optional short error summary
+Use **only** `store-time` for checkpoint/discovery logic.
 
-Recommendation for the initial default state:
+If a record is missing `store-time`:
 
-```json
-{
-  "enumeration_checkpoint_store_time_max": null,
-  "files": {}
-}
-```
+- log it
+- skip using it for checkpoint advancement
+- continue processing other records
 
-Do not add extra schema complexity unless it is clearly needed for the next step.
+### Checkpoint advancement rule
 
----
-## Storage/Layout Assumptions This Step Should Use
+This step should make it easy for callers to update the checkpoint only when:
 
-Use the v05 collection-local layout:
+- pagination completed successfully
+- the updated local state is written durably
 
-```text
-{root}/collections/{collection_id}/
-  warcs/
-  fixity/
-  state.json
-```
-
-Important:
-
-- This step only needs to manage `state.json` paths and parent-directory creation.
-- It does **not** need to create year/month subdirectories yet.
-- It does **not** need to create WARC or fixity files yet.
-
----
-## Behavioral Requirements
-
-### Loading behavior
-
-When loading state:
-
-- if `state.json` does not exist, return the default state
-- if `state.json` exists and contains valid JSON object data, return that data
-- if `state.json` is malformed or not an object, fail clearly with a helpful exception
-
-### Writing behavior
-
-When saving state:
-
-- ensure the collection directory exists
-- write to a temporary file in the same directory
-- atomically replace the target `state.json`
-- produce stable, readable JSON formatting
-
-### Data-shape behavior
-
-For this step, keep validation practical rather than elaborate:
-
-- require the top-level loaded payload to be a JSON object
-- ensure missing top-level required keys are filled with defaults
-- preserve existing file-manifest entries if present
-
-Do not build a large custom validation framework yet.
+The module itself does not have to persist the checkpoint automatically, but its API should expose the information needed to do so correctly.
 
 ---
 ## Recommended API Shape
 
-Keep the API small and easy to test. Illustrative names:
+Keep the module small and testable. Illustrative function names:
 
 ```python
-def build_collection_root_path(storage_root: Path, collection_id: int) -> Path:
+def compute_store_time_after_datetime(
+    checkpoint_store_time_max: str | None,
+    now: datetime,
+    overlap_days: int = 30,
+) -> datetime:
     ...
 
 
-def build_state_file_path(storage_root: Path, collection_id: int) -> Path:
+def format_wasapi_datetime(value: datetime) -> str:
     ...
 
 
-def make_default_collection_state() -> dict[str, object]:
+def extract_discovery_records(page_payload: dict[str, object]) -> list[dict[str, object]]:
     ...
 
 
-def load_collection_state(storage_root: Path, collection_id: int) -> dict[str, object]:
+def extract_record_store_time(record: dict[str, object]) -> str | None:
     ...
 
 
-def save_collection_state(storage_root: Path, collection_id: int, state: dict[str, object]) -> Path:
+def fetch_collection_discovery(
+    client: httpx.Client,
+    base_url: str,
+    collection_id: int,
+    after_datetime: datetime,
+    page_size: int,
+) -> dict[str, object]:
     ...
 ```
 
-These exact names are not mandatory, but the implementation should stay close to this level of simplicity.
+An alternative is to return a small result dataclass, for example with:
+
+- discovered records
+- request history
+- completed-successfully flag
+- max observed `store-time`
+
+Either approach is fine if it stays simple.
 
 ---
-## Test Expectations
+## Data the Discovery Step Must Return
 
-Add focused `unittest` coverage for the new local-state helpers.
+At minimum, the discovery result for one collection should make available:
+
+- the collection id
+- the query boundary actually used
+- the records discovered across all pages
+- the max observed usable `store-time`
+- enough request/paging metadata to debug failures
+- whether enumeration finished successfully
+
+The records returned for later download-decision code should preserve fields such as:
+
+- filename
+- `store-time`
+- file size if present
+- source/download URL if present
+- any record fields later steps may need for download and logging
+
+Prefer preserving record payloads rather than aggressively narrowing them too early.
+
+---
+## HTTP / Paging Requirements
+
+The module should:
+
+- use `httpx`
+- request WASAPI pages for a single collection
+- include `store-time-after` in query params
+- follow pagination until complete
+- fail clearly on malformed responses or HTTP errors
+
+Recommendation:
+
+- keep retry behavior minimal in this step unless it falls out naturally
+- record request URLs/params in returned debug metadata
+- treat non-object JSON responses as errors
+
+---
+## Test Requirements
+
+Add focused `unittest` coverage for the discovery helpers.
 
 ### Minimum tests to include
 
-- **Default-load case**
-  - loading state for a collection with no existing `state.json` returns the default structure
+- **Query-boundary with checkpoint**
+  - subtracts 30 days from a provided checkpoint
 
-- **Round-trip save/load case**
-  - saving a valid state and loading it again returns the expected content
+- **Query-boundary without checkpoint**
+  - uses `now` as the reference point
 
-- **Path-construction case**
-  - the collection root and `state.json` paths match the v05 layout
+- **Store-time extraction behavior**
+  - valid `store-time` is returned
+  - missing `store-time` returns `None`
 
-- **Malformed JSON failure case**
-  - an invalid `state.json` raises a clear error
+- **Pagination happy path**
+  - multiple mocked WASAPI pages are fetched and combined
+  - max observed `store-time` is computed from the full successful enumeration
 
-- **Missing-key normalization case**
-  - loading an older or partial JSON object fills in missing required top-level keys
+- **Missing `store-time` tolerance**
+  - records without `store-time` do not break enumeration
+  - they are excluded from checkpoint-max computation
 
-### Nice-to-have test
+- **Malformed response failure**
+  - non-object JSON or structurally invalid page payload raises a clear error
 
-- **Atomic-save sanity check**
-  - saving state leaves a final `state.json` in place and does not leave the temp file behind
+### Reasonable mocking approach
 
-Use `tempfile.TemporaryDirectory()` or equivalent standard-library helpers rather than external test dependencies.
+Keep tests lightweight.
+
+- Use a fake client object or `unittest.mock` to simulate `httpx.Client.get()`.
+- Do not create live-network tests.
 
 ---
 ## Suggested Implementation Notes
 
-- Keep the code in `lib/`, not in `main.py`.
-- Prefer plain dict-based state for now rather than introducing dataclasses or pydantic-style schema code.
-- Use `pathlib.Path` throughout.
-- Keep functions top-level and individually testable.
-- Make the smallest correct production abstraction that later WASAPI and downloader steps can call.
+- Put all production discovery logic in `lib/`, not in `main.py`.
+- Keep the code independent from Google Sheets and downloader concerns.
+- Reuse the existing local-state module by passing the saved checkpoint value into the discovery helper.
+- Keep return values explicit enough that the later orchestrator can decide when to persist an updated checkpoint.
 
 ---
 ## Success Criteria
 
-- [ ] a new production local-state module exists under `lib/`
-- [ ] the module can compute collection-local `state.json` paths
-- [ ] the module returns a default state when `state.json` is absent
-- [ ] the module saves JSON atomically to `state.json`
-- [ ] the module fails clearly on malformed state files
-- [ ] focused `unittest` coverage exists for happy-path and edge-case behavior
+- [ ] a new production WASAPI discovery module exists under `lib/`
+- [ ] the module computes `store-time-after` using the 30-day overlap rule
+- [ ] the module fetches paginated WASAPI results for one collection
+- [ ] the module tolerates records missing `store-time` while excluding them from checkpoint-max calculation
+- [ ] the module returns the max usable `store-time` from successful enumeration
+- [ ] focused `unittest` coverage exists for query-boundary, paging, and failure behavior
 
 ---
 ## Likely Follow-Up After This Step
 
-After local state is implemented and tested, the next step should be:
+After production WASAPI discovery is implemented and tested, the next step should likely be:
 
-1. implement WASAPI discovery using `store-time`
-2. read `enumeration_checkpoint_store_time_max`
-3. apply the 30-day overlap window
-4. enumerate candidate WARC records for download decisions
-
-That follow-up will then have a stable persisted state layer to build on.
+1. implement local year/month path building for collection WARC storage
+2. define the download job shape from discovered WASAPI records
+3. implement the downloader with temp-file then atomic rename
 
 ---
 ## Handoff Notes for the Next Agent / New Session
@@ -257,11 +269,13 @@ If you are picking this up in a new session, re-read:
 - `warc_tracker_script/AGENTS.md`
 - `warc_tracker_script/PLAN__simplified_warc_backup_script_v05.md`
 - `warc_tracker_script/PLAN__next_single_step.md`
+- `warc_tracker_script/OLD_PLAN__next_single_step.md`
 
 Quick mental model of the codebase right now:
 
-- `lib/collection_sheet.py` is the main finished production module.
-- `tmp_inspect_collection_wasapi.py` is an already-implemented investigative tool, not the next production milestone.
-- `main.py` is intentionally small and should probably stay that way during this step.
+- `lib/collection_sheet.py` handles sheet ingestion.
+- `lib/local_state.py` handles per-collection `state.json` persistence.
+- `tmp_inspect_collection_wasapi.py` is investigative and should not be treated as the production discovery layer.
+- `main.py` is still intentionally minimal.
 
-The immediate objective is to add the smallest durable local-state layer that subsequent WASAPI and downloader work can trust.
+The immediate objective is to add the smallest correct production WASAPI discovery layer that consumes the persisted local checkpoint and exposes clean results for later download logic.

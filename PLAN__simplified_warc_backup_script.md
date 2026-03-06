@@ -19,6 +19,25 @@ The local filesystem state is the source of truth. The spreadsheet is mainly a r
 
 ---
 
+## Implementation status snapshot
+
+Completed so far:
+
+- configuration/env-var loading exists in `main.py`
+- spreadsheet ingestion with header detection and canonical field mapping exists in `lib/collection_sheet.py`
+- per-collection local `state.json` handling exists in `lib/local_state.py`
+- a temporary investigative WASAPI metadata-capture script exists in `tmp_inspect_collection_wasapi.py`
+- focused `unittest` coverage exists for the sheet-ingestion, local-state, and temporary WASAPI-inspection helpers
+
+Not yet implemented in the production backup flow:
+
+- production WASAPI discovery using `store-time` plus 30-day overlap
+- local year/month path building for downloaded WARCs and fixity sidecars
+- downloader and SHA-256/fixity writing
+- Trio orchestration and spreadsheet updater flow
+
+---
+
 ## Locked decisions
 
 - Discovery clock: **`store-time` only**
@@ -315,10 +334,10 @@ Keep this minimal and practical.
 
 ## MVP implementation sequence
 
-1. Define configuration and required env vars.
-2. Implement spreadsheet ingestion with header detection and canonical field mapping.
-3. Implement per-collection local `state.json`.
-4. Implement WASAPI discovery with `store-time` plus 30-day overlap.
+1. [x] Define configuration and required env vars.
+2. [x] Implement spreadsheet ingestion with header detection and canonical field mapping.
+3. [x] Implement per-collection local `state.json`.
+4. [ ] Implement WASAPI discovery with `store-time` plus 30-day overlap.
 5. Implement local path building using the year/month collection layout.
 6. Implement downloader with temp-file then atomic rename.
 7. Implement SHA-256 sidecar writing.
