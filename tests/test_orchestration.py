@@ -12,6 +12,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from lib.collection_sheet import CollectionJob
 from lib.orchestration import (
+    build_planned_download_paths,
     count_pending_download_candidates,
     get_archive_it_credentials,
     get_downloaded_storage_root,
@@ -92,6 +93,47 @@ class TestCountPendingDownloadCandidates(TestCase):
         self.assertEqual(result, 2)
 
 
+class TestBuildPlannedDownloadPaths(TestCase):
+    """
+    Test cases for planned local destination-path building.
+    """
+
+    def test_builds_paths_for_records_with_usable_filenames(self):
+        """
+        Checks that filename-bearing records become planned WARC and fixity destinations.
+        """
+        discovered_records = [
+            {'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'},
+            {'filename': '   '},
+            {'store-time': '2026-03-01T00:00:00Z'},
+        ]
+
+        result = build_planned_download_paths(Path('/tmp/storage'), 123, discovered_records)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].year, '2026')
+        self.assertEqual(result[0].month, '03')
+        self.assertTrue(
+            str(result[0].warc_path).endswith(
+                '/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
+            )
+        )
+
+    def test_skips_records_with_invalid_filenames(self):
+        """
+        Checks that invalid filenames are skipped instead of breaking orchestration.
+        """
+        discovered_records = [
+            {'filename': 'not-a-parseable-warc-name.warc.gz'},
+        ]
+
+        with patch('lib.orchestration.log.exception') as mock_log_exception:
+            result = build_planned_download_paths(Path('/tmp/storage'), 123, discovered_records)
+
+        self.assertEqual(result, [])
+        self.assertTrue(mock_log_exception.called)
+
+
 class TestProcessCollectionJob(TestCase):
     """
     Test cases for per-collection orchestration.
@@ -123,6 +165,8 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.compute_store_time_after_datetime') as mock_compute,
             patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
             patch('lib.orchestration.save_collection_state') as mock_save,
+            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
+            patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
             patch('lib.orchestration.log_not_yet_implemented_stages') as mock_log_stub,
         ):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
@@ -130,7 +174,10 @@ class TestProcessCollectionJob(TestCase):
 
         saved_state = mock_save.call_args.args[2]
         self.assertEqual(saved_state['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
+        self.assertEqual(mock_build_paths.call_args.args[1], 123)
+        self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_log_stub.call_args.args[1], 1)
+        self.assertEqual(mock_log_stub.call_args.args[2], 1)
 
     def test_skips_checkpoint_save_when_discovery_not_complete(self):
         """
@@ -158,13 +205,18 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.compute_store_time_after_datetime') as mock_compute,
             patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
             patch('lib.orchestration.save_collection_state') as mock_save,
+            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
+            patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
             patch('lib.orchestration.log_not_yet_implemented_stages') as mock_log_stub,
         ):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
             process_collection_job(client, collection_job, Path('/tmp/storage'), 'https://example.org/wasapi')
 
         self.assertFalse(mock_save.called)
+        self.assertEqual(mock_build_paths.call_args.args[1], 123)
+        self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_log_stub.call_args.args[1], 1)
+        self.assertEqual(mock_log_stub.call_args.args[2], 1)
 
 
 if __name__ == '__main__':

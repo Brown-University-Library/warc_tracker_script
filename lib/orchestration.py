@@ -7,6 +7,7 @@ import httpx
 
 from lib.collection_sheet import CollectionJob
 from lib.local_state import load_collection_state, save_collection_state
+from lib.storage_layout import PlannedCollectionPaths, StorageLayoutError, plan_collection_paths
 from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collection_discovery
 
 DEFAULT_STORAGE_ROOT: Path = Path(__file__).resolve().parent.parent / 'storage'
@@ -55,14 +56,59 @@ def count_pending_download_candidates(discovered_records: list[dict[str, object]
     return result
 
 
-def log_not_yet_implemented_stages(collection_job: CollectionJob, pending_download_count: int) -> None:
+def build_planned_download_paths(
+    storage_root: Path,
+    collection_id: int,
+    discovered_records: list[dict[str, object]],
+) -> list[PlannedCollectionPaths]:
+    """
+    Builds planned local WARC and fixity destinations for discovered records with usable filenames.
+    """
+    planned_paths: list[PlannedCollectionPaths] = []
+    for record in discovered_records:
+        filename_value = record.get('filename')
+        if not isinstance(filename_value, str) or not filename_value.strip():
+            continue
+        try:
+            planned_paths.append(plan_collection_paths(storage_root, collection_id, filename_value))
+        except StorageLayoutError:
+            log.exception(
+                'Collection %s record filename could not be mapped to the local storage layout: %s',
+                collection_id,
+                filename_value,
+            )
+    result = planned_paths
+    return result
+
+
+def log_planned_download_paths(collection_id: int, planned_paths: list[PlannedCollectionPaths]) -> None:
+    """
+    Logs the planned local WARC and fixity destinations for discovered records.
+    """
+    for planned_path in planned_paths:
+        log.info(
+            'Collection %s planned paths for %s: warc=%s sha256=%s json=%s',
+            collection_id,
+            planned_path.filename,
+            planned_path.warc_path,
+            planned_path.sha256_path,
+            planned_path.json_path,
+        )
+
+
+def log_not_yet_implemented_stages(
+    collection_job: CollectionJob,
+    pending_download_count: int,
+    planned_path_count: int,
+) -> None:
     """
     Logs the planned but not-yet-implemented stages for one collection.
     """
     log.info(
-        'Collection %s has %s pending download candidates; download queue submission is not implemented yet.',
+        'Collection %s has %s pending download candidates and %s planned local path mappings; download queue submission is not implemented yet.',
         collection_job.collection_id,
         pending_download_count,
+        planned_path_count,
     )
     log.info(
         'Collection %s spreadsheet progress updates are not implemented yet.',
@@ -113,4 +159,6 @@ def process_collection_job(
         )
 
     pending_download_count = count_pending_download_candidates(discovery_result.records, state)
-    log_not_yet_implemented_stages(collection_job, pending_download_count)
+    planned_paths = build_planned_download_paths(storage_root, collection_job.collection_id, discovery_result.records)
+    log_planned_download_paths(collection_job.collection_id, planned_paths)
+    log_not_yet_implemented_stages(collection_job, pending_download_count, len(planned_paths))
