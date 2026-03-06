@@ -158,18 +158,22 @@ Use a simpler layout than earlier drafts.
 ```text
 {root}/collections/{collection_id}/
   warcs/
-    {filename}
+    {yyyy}/
+      {mm}/
+        {filename}
   fixity/
-    {filename}.sha256
-    {filename}.json
+    {yyyy}/
+      {mm}/
+        {filename}.sha256
+        {filename}.json
   state.json
 ```
 
 Notes:
 
 - Keep all files for a collection together.
-- Do not add sharding, crawl folders, or date folders in MVP.
-- Add those only if scale proves they are necessary.
+- Use a simple year/month path partition derived from the WARC filename timestamp.
+- Do not add more complex sharding or crawl-specific folders in MVP.
 
 ### Fixity artifacts
 For each downloaded WARC:
@@ -315,7 +319,7 @@ Keep this minimal and practical.
 2. Implement spreadsheet ingestion with header detection and canonical field mapping.
 3. Implement per-collection local `state.json`.
 4. Implement WASAPI discovery with `store-time` plus 30-day overlap.
-5. Implement local path building using the simple collection layout.
+5. Implement local path building using the year/month collection layout.
 6. Implement downloader with temp-file then atomic rename.
 7. Implement SHA-256 sidecar writing.
 8. Implement the `Trio` flow:
@@ -337,7 +341,7 @@ These items are intentionally postponed:
 - sqlite
 - resume via HTTP range requests
 - complex directory sharding
-- semantic crawl/date directory trees
+- semantic crawl-specific directory trees beyond the simple year/month layout
 - remote checksum comparison
 - frequent per-file spreadsheet updates
 - multiple concurrent download workers
