@@ -5,9 +5,9 @@ from pathlib import Path
 
 import httpx
 
-from lib.collection_sheet import CollectionJob, fetch_collection_jobs
+from lib.collection_sheet import CollectionJob
 from lib.local_state import load_collection_state, save_collection_state
-from lib.wasapi_discovery import WasapiDiscoveryError, compute_store_time_after_datetime, fetch_collection_discovery
+from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collection_discovery
 
 DEFAULT_STORAGE_ROOT: Path = Path(__file__).resolve().parent.parent / 'storage'
 
@@ -114,32 +114,3 @@ def process_collection_job(
 
     pending_download_count = count_pending_download_candidates(discovery_result.records, state)
     log_not_yet_implemented_stages(collection_job, pending_download_count)
-
-
-def run_collection_orchestration(
-    spreadsheet_id: str,
-    storage_root: Path,
-    wasapi_base_url: str,
-    archive_it_credentials: tuple[str, str],
-) -> None:
-    """
-    Runs the current sequential collection orchestration flow.
-    """
-    collection_jobs = fetch_collection_jobs(spreadsheet_id)
-    log.info('Active collections found: %s', len(collection_jobs))
-
-    timeout = httpx.Timeout(30.0, connect=30.0)
-    with httpx.Client(auth=archive_it_credentials, timeout=timeout, follow_redirects=True) as client:
-        for collection_job in collection_jobs:
-            try:
-                process_collection_job(client, collection_job, storage_root, wasapi_base_url)
-            except WasapiDiscoveryError as exc:
-                partial_result = exc.partial_result
-                partial_record_count = 0 if partial_result is None else len(partial_result.records)
-                log.exception(
-                    'Collection %s discovery failed after %s partial records.',
-                    collection_job.collection_id,
-                    partial_record_count,
-                )
-            except Exception:
-                log.exception('Collection %s processing failed.', collection_job.collection_id)
