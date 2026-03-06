@@ -237,6 +237,9 @@ Per collection, `state.json` should hold:
 
 Optionally generate a simple `run_id` for logging and sheet traceability, but do not require a separate per-run JSON artifact in MVP.
 
+For concurrent download logging, each download worker should also have a stable short label and include the current filename in log context.
+A human-friendly combined display label such as `w1:filename` or `w2:filename` should be used in download-related logs so interleaved worker output remains easy to follow.
+
 ---
 
 ## Trio architecture: Option 1
@@ -268,6 +271,7 @@ Each worker:
 3. renames atomically on success
 4. computes SHA-256 and writes fixity sidecars
 5. emits a success or failure event back to the orchestrator
+6. writes download-related logs using a combined display label such as `w1:filename` or `w2:filename`
 
 ### Sheet updater
 This task:
