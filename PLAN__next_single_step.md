@@ -1,4 +1,4 @@
-# Next Single Step: Temporary Single-Collection WASAPI Metadata Capture Script
+# Next Single Step: Implement Per-Collection Local `state.json` Management
 
 ## Context for Future Agents
 
@@ -8,355 +8,260 @@
 
 **Current implementation status**:
 
-- Sheet ingestion is already implemented in `warc_tracker_script/lib/collection_sheet.py`.
-- The manager/orchestrator is currently minimal in `warc_tracker_script/main.py`.
-- The simplified v05 plan currently assumes a per-collection local storage layout of:
-  - `collections/{collection_id}/warcs/{filename}`
-  - `collections/{collection_id}/fixity/{filename}.sha256`
-  - `collections/{collection_id}/fixity/{filename}.json`
-  - `collections/{collection_id}/state.json`
-- That storage assumption has not yet been validated against real Archive-It / Internet Archive metadata patterns.
+- Spreadsheet ingestion is already implemented in `warc_tracker_script/lib/collection_sheet.py`.
+- The temporary WASAPI inspection script already exists in `warc_tracker_script/tmp_inspect_collection_wasapi.py`.
+- Tests already exist for sheet parsing and the temporary WASAPI inspection helpers.
+- `main.py` is still minimal and currently only loads active collection jobs from the spreadsheet.
+- The next missing production building block in the v05 implementation sequence is per-collection local state.
 
 **Important current code facts**:
 
-- The project uses Python `3.12` per `pyproject.toml`.
-- Use `httpx` for HTTP work.
-- Tests should use `unittest`, not `pytest`.
-- `ruff.toml` uses single quotes and a max line length of `125`.
+- The project uses Python `3.12` per repository instructions.
+- Use `unittest`, not `pytest`.
+- Use single quotes and stay within `ruff.toml` line-length guidance.
+- The local filesystem is the source of truth for the backup workflow.
 
 ---
 ## Goal of This Step
 
-Create a **temporary investigative script plan** for a script that:
+Implement the first production version of **per-collection local `state.json` handling** so later steps can rely on stable local checkpoint and retry state.
 
-- accepts a single Archive-It `collection_id`
-- performs one or more Archive-It / Internet Archive WASAPI lookups
-- downloads the JSON metadata needed for later manual inspection
-- writes that metadata to a caller-provided target directory
-- does **not** download WARC payload files
-- does **not** make the final storage-layout decision
+This step should create code and tests for a small library module that can:
 
-The purpose of the future script is to gather enough real metadata to answer this question:
+- compute the per-collection state-file path
+- create an in-memory default state structure when no file exists
+- load existing `state.json` safely from disk
+- write updated state atomically back to disk
+- preserve the minimum fields required by the v05 plan
 
-- should the simplified backup plan keep a flat per-collection filename layout, or
-- should it introduce an identifier-derived subdirectory or pairtree-like naming convention?
+This step should **not** yet implement downloader logic or full WASAPI orchestration.
 
 ---
 ## Why This Is the Right Next Step
 
-1. **It de-risks the storage-layout decision early**
-   - The simplified plan currently assumes that saving files as `warcs/{filename}` is sufficient.
-   - That assumption may be correct, but it should be checked against real metadata before path-building and state logic are implemented around it.
+1. **It matches the v05 implementation order**
+   - The plan sequence puts local `state.json` immediately after spreadsheet ingestion.
+   - Spreadsheet ingestion is already done.
 
-2. **It keeps the investigation narrow**
-   - This step is not an OCFL implementation step.
-   - This step is only about collecting real metadata for inspection.
+2. **It unlocks the next production steps cleanly**
+   - WASAPI discovery needs a persisted checkpoint.
+   - Retry and dedupe behavior need a persisted filename manifest.
 
-3. **It may prevent unnecessary complexity**
-   - If real metadata shows that filenames are already unique and path-safe enough, then the simplified plan can stay simple with more confidence.
-   - If real metadata shows collisions, awkward identifiers, or grouping needs, that can be addressed before the downloader is built.
+3. **It keeps scope narrow but production-relevant**
+   - This is a small, testable library step.
+   - It avoids prematurely mixing filesystem state, networking, and concurrency into one change.
 
-4. **It avoids baking in stale assumptions**
-   - The prior next-step plan targeted local state management first.
-   - This temporary investigative step is now more valuable because the storage naming decision affects local path design, manifest keys, and fixity sidecar placement.
+4. **It establishes the source-of-truth model early**
+   - The v05 plan explicitly says the local filesystem is authoritative.
+   - A stable state-file contract should exist before downloader and orchestrator code accumulate assumptions around it.
 
 ---
-## Scope Boundaries for This Step
+## In-Scope Deliverables
 
-### In scope
+Implement a new production library module, likely something like:
 
-- Plan a temporary standalone script.
-- Limit the script to a **single collection id** per invocation.
-- Fetch and persist JSON metadata only.
-- Define the target directory structure for captured metadata.
-- Define what metadata should be preserved so it can be inspected later without repeating network calls.
-- Define a small amount of summary output that helps confirm what was captured.
+- `warc_tracker_script/lib/local_state.py`
 
-### Out of scope
+And add focused tests, likely something like:
 
-- No WARC downloads.
-- No spreadsheet reads.
+- `warc_tracker_script/tests/test_local_state.py`
+
+The module should provide helpers for:
+
+- building the collection root path
+- building the `state.json` path
+- loading state from disk
+- returning a default state when no file exists
+- writing state atomically
+
+---
+## Out of Scope for This Step
+
+- No WASAPI HTTP requests.
+- No downloader implementation.
+- No fixity hashing.
 - No spreadsheet writes.
-- No local state / checkpoint implementation for the main backup workflow.
 - No Trio concurrency.
-- No OCFL implementation.
-- No automatic determination of the final naming convention.
-- No broad refactor of `main.py`.
+- No lock/cron wrapper work.
+- No end-to-end orchestration in `main.py` beyond, at most, tiny non-invasive integration if absolutely needed.
 
 ---
-## Core Question the Future Script Must Help Answer
+## Required State Shape for MVP
 
-The future script should collect enough metadata to support inspection of the following:
+The state structure should stay minimal and aligned with the v05 plan.
 
-- Are WARC filenames unique within a collection?
-- Do records expose a stable identifier that is more suitable than filename for local path construction?
-- Are there multiple metadata records that would map to the same local filename?
-- Are filenames path-safe as-is, or do they contain problematic characters or lengths?
-- Is there evidence that files naturally group under an Internet Archive identifier that would justify a subdirectory layer?
-- Is there any practical reason to consider pairtree-like path derivation, or would that be needless complexity for MVP?
+At minimum, support:
 
-The future script should not answer these questions automatically, but it should capture the data necessary for a human to answer them.
+- `enumeration_checkpoint_store_time_max`
+- `files`
 
----
-## Recommended Script Shape
+The `files` mapping should be keyed by filename and allow values such as:
 
-Create a temporary script such as:
+- `status`
+- `last_attempt_at`
+- `error_count`
+- optional short error summary
 
-- `warc_tracker_script/tmp_inspect_collection_wasapi.py`
+Recommendation for the initial default state:
 
-This future script should be treated as:
-
-- investigative
-- standalone
-- safe to discard later once the storage convention is decided
-
-Recommendation:
-
-- keep the script independent from the production backup flow
-- keep it out of `main.py`
-- put any reusable HTTP or parsing helpers in `lib/` only if that happens naturally and stays small
-
----
-## Expected CLI Behavior
-
-The future script should accept at least:
-
-- `--collection-id` or positional `collection_id`
-- `--output-dir` for the destination directory
-
-Optional but useful flags:
-
-- `--log-level`
-
-Recommendation:
-
-- fail clearly if required arguments are missing
-- append a timestamped subdirectory to the supplied output-directory argument and create that destination directory
-- do not add overwrite or resume behavior for this temporary script
-
----
-## Metadata to Capture
-
-The future script should save enough raw metadata to support both detailed inspection and later reproducibility.
-
-### Minimum required captures
-
-For a given collection, preserve:
-
-1. **Collection request metadata**
-   - the collection id used
-   - request timestamps
-   - request URLs actually called
-   - any paging parameters used
-
-2. **Raw WASAPI response pages**
-   - save each JSON page as returned
-   - preserve page ordering
-   - do not reduce these to only a handpicked subset of fields
-
-3. **A lightweight manifest / index file**
-   - list the saved JSON files
-   - record page count
-   - record total item count if determinable
-   - record any request failures or truncation decisions
-
-4. **A derived summary file**
-   - include a human-readable high-level summary of key metadata traits
-   - for example: distinct filenames, duplicate filenames, observed identifiers, suspicious path characters, long filenames
-
-### Nice-to-have captures
-
-If the API responses expose them, preserve fields relevant to later path analysis such as:
-
-- filename
-- original filename if distinct
-- item identifier
-- crawl identifier
-- store-time
-- file size
-- download URL
-- collection identifier repeated inside records
-- any parent/child or grouping fields
-
-The raw response pages are the most important artifact. The summary is secondary.
-
----
-## Output Layout Recommendation
-
-Use a directory layout that makes manual inspection straightforward.
-
-```text
-{output_dir}/
-  collection_{collection_id}/
-    request_manifest.json
-    pages/
-      page_0001.json
-      page_0002.json
-      ...
-    derived_summary.json
-    derived_summary.md
+```json
+{
+  "enumeration_checkpoint_store_time_max": null,
+  "files": {}
+}
 ```
 
-Notes:
-
-- Keep the raw pages separate from derived summary artifacts.
-- Use stable, zero-padded page numbering.
-- Preserve enough request context in `request_manifest.json` so the capture can be understood later.
-- The output layout for this temporary script does not need to match the final production backup layout.
+Do not add extra schema complexity unless it is clearly needed for the next step.
 
 ---
-## HTTP / API Behavior Requirements
+## Storage/Layout Assumptions This Step Should Use
 
-The future script should:
+Use the v05 collection-local layout:
 
-- use `httpx`
-- authenticate using environment variables already intended for Archive-It access
-- follow WASAPI paging until all pages are retrieved
-- log each request clearly enough that failures can be understood
-- fail clearly on authentication problems or malformed responses
-
-Recommendation:
-
-- keep retry behavior minimal and practical
-- preserve partial results if some pages were fetched before failure
-- record failures in the manifest rather than silently discarding them
-
----
-## Data Preservation Requirements
-
-The future script should optimize for later inspection.
-
-1. **Prefer raw preservation over aggressive transformation**
-   - Save raw response JSON pages first.
-   - Derived summaries should never be the only artifact.
-
-2. **Make outputs inspectable without rerunning the script**
-   - A later session should be able to review the saved directory and answer naming-structure questions without hitting the network again.
-
-3. **Record enough provenance**
-   - Include timestamps, called URLs, and collection id in saved metadata.
-
-4. **Do not over-normalize identifiers**
-   - If a field appears in raw JSON, preserve it as-is.
-   - Normalization can happen later in analysis code if needed.
-
----
-## Recommended Derived Analysis to Include
-
-The future script should compute a small derived summary to accelerate human review.
-
-Recommended summary sections:
-
-- total records observed
-- total pages saved
-- count of records with filenames
-- count of distinct filenames
-- list or sample of duplicate filenames
-- count of records with identifier-like fields
-- distinct identifier field names observed
-- examples of filename/path anomalies
-- top-level note on whether a flat filename layout appears obviously safe, obviously unsafe, or still unclear
+```text
+{root}/collections/{collection_id}/
+  warcs/
+  fixity/
+  state.json
+```
 
 Important:
 
-- the summary should be descriptive, not prescriptive
-- it should not claim to make the final storage-design decision
+- This step only needs to manage `state.json` paths and parent-directory creation.
+- It does **not** need to create year/month subdirectories yet.
+- It does **not** need to create WARC or fixity files yet.
 
 ---
-## Suggested Implementation Structure
+## Behavioral Requirements
 
-For the future implementation, a reasonable structure would be:
+### Loading behavior
 
-- temporary script module for CLI and orchestration
-- small helper functions for:
-  - building request URLs or params
-  - fetching paginated JSON
-  - saving raw pages
-  - generating the request manifest
-  - generating a derived summary
+When loading state:
 
-Possible helper names:
+- if `state.json` does not exist, return the default state
+- if `state.json` exists and contains valid JSON object data, return that data
+- if `state.json` is malformed or not an object, fail clearly with a helpful exception
+
+### Writing behavior
+
+When saving state:
+
+- ensure the collection directory exists
+- write to a temporary file in the same directory
+- atomically replace the target `state.json`
+- produce stable, readable JSON formatting
+
+### Data-shape behavior
+
+For this step, keep validation practical rather than elaborate:
+
+- require the top-level loaded payload to be a JSON object
+- ensure missing top-level required keys are filled with defaults
+- preserve existing file-manifest entries if present
+
+Do not build a large custom validation framework yet.
+
+---
+## Recommended API Shape
+
+Keep the API small and easy to test. Illustrative names:
 
 ```python
-
-def fetch_collection_wasapi_pages(...) -> list[dict[str, object]]:
+def build_collection_root_path(storage_root: Path, collection_id: int) -> Path:
     ...
 
 
-def save_raw_wasapi_pages(...) -> list[Path]:
+def build_state_file_path(storage_root: Path, collection_id: int) -> Path:
     ...
 
 
-def build_capture_manifest(...) -> dict[str, object]:
+def make_default_collection_state() -> dict[str, object]:
     ...
 
 
-def build_metadata_summary(...) -> dict[str, object]:
+def load_collection_state(storage_root: Path, collection_id: int) -> dict[str, object]:
+    ...
+
+
+def save_collection_state(storage_root: Path, collection_id: int, state: dict[str, object]) -> Path:
     ...
 ```
 
-These names are illustrative only. Keep the implementation small and direct.
+These exact names are not mandatory, but the implementation should stay close to this level of simplicity.
 
 ---
 ## Test Expectations
 
-Because this is a temporary investigative script, keep testing proportionate.
+Add focused `unittest` coverage for the new local-state helpers.
 
-### In scope for tests
+### Minimum tests to include
 
-- pure helper functions that summarize metadata
-- path-building helpers for the capture directory
-- manifest-generation helpers
+- **Default-load case**
+  - loading state for a collection with no existing `state.json` returns the default structure
 
-### Out of scope for heavy testing
+- **Round-trip save/load case**
+  - saving a valid state and loading it again returns the expected content
 
-- full live-network integration tests
-- large mocking harnesses unless they stay very small
+- **Path-construction case**
+  - the collection root and `state.json` paths match the v05 layout
 
-If tests are written, use `unittest`.
+- **Malformed JSON failure case**
+  - an invalid `state.json` raises a clear error
+
+- **Missing-key normalization case**
+  - loading an older or partial JSON object fills in missing required top-level keys
+
+### Nice-to-have test
+
+- **Atomic-save sanity check**
+  - saving state leaves a final `state.json` in place and does not leave the temp file behind
+
+Use `tempfile.TemporaryDirectory()` or equivalent standard-library helpers rather than external test dependencies.
+
+---
+## Suggested Implementation Notes
+
+- Keep the code in `lib/`, not in `main.py`.
+- Prefer plain dict-based state for now rather than introducing dataclasses or pydantic-style schema code.
+- Use `pathlib.Path` throughout.
+- Keep functions top-level and individually testable.
+- Make the smallest correct production abstraction that later WASAPI and downloader steps can call.
 
 ---
 ## Success Criteria
 
-- [ ] the new next-step plan targets a temporary metadata-capture script rather than local-state management
-- [ ] the planned script is limited to a single `collection_id` per run
-- [ ] the planned script is clearly described as metadata-only and non-production
-- [ ] the plan requires saving raw paginated JSON responses for later inspection
-- [ ] the plan defines an inspectable output directory structure
-- [ ] the plan keeps the final naming-convention decision explicitly deferred
+- [ ] a new production local-state module exists under `lib/`
+- [ ] the module can compute collection-local `state.json` paths
+- [ ] the module returns a default state when `state.json` is absent
+- [ ] the module saves JSON atomically to `state.json`
+- [ ] the module fails clearly on malformed state files
+- [ ] focused `unittest` coverage exists for happy-path and edge-case behavior
 
 ---
 ## Likely Follow-Up After This Step
 
-After the future script is implemented and run against a handful of real collections:
+After local state is implemented and tested, the next step should be:
 
-1. inspect the saved metadata
-2. decide whether the simplified plan should keep:
-   - flat `warcs/{filename}` storage, or
-   - a shallow identifier-derived subdirectory, or
-   - a pairtree-like naming convention
-3. update `PLAN__simplified_warc_backup_script_v05.md` if needed
-4. write the next implementation plan for the actual production step after that decision is made
+1. implement WASAPI discovery using `store-time`
+2. read `enumeration_checkpoint_store_time_max`
+3. apply the 30-day overlap window
+4. enumerate candidate WARC records for download decisions
+
+That follow-up will then have a stable persisted state layer to build on.
 
 ---
 ## Handoff Notes for the Next Agent / New Session
 
-If you are picking this up in a new session, start by re-reading:
+If you are picking this up in a new session, re-read:
 
 - `warc_tracker_script/AGENTS.md`
 - `warc_tracker_script/PLAN__simplified_warc_backup_script_v05.md`
 - `warc_tracker_script/PLAN__next_single_step.md`
-- optionally `warc_tracker_script/OLD_PLAN__next_single_step.md` for the deferred local-state plan
 
 Quick mental model of the codebase right now:
 
-- `main.py` is still intentionally small.
-- `lib/collection_sheet.py` is the main completed library module so far.
-- The immediate question is not downloader implementation; it is whether real metadata supports the current simplified storage naming assumption.
+- `lib/collection_sheet.py` is the main finished production module.
+- `tmp_inspect_collection_wasapi.py` is an already-implemented investigative tool, not the next production milestone.
+- `main.py` is intentionally small and should probably stay that way during this step.
 
-The next implementation should preserve these architectural directions:
-
-- keep production logic simple
-- keep temporary investigation code separate from production orchestration
-- preserve raw metadata for later review
-- avoid prematurely adopting OCFL-style complexity unless real data shows a clear need
+The immediate objective is to add the smallest durable local-state layer that subsequent WASAPI and downloader work can trust.
