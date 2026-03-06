@@ -1,3 +1,12 @@
+"""
+Downloads metadata (not WARC files) for a single Archive-It collection using the WASAPI endpoint.
+
+Usage:
+    uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./output_dir
+
+Note that the created output_dir will have a timestamp appended to the directory-name.
+"""
+
 import argparse
 import json
 import logging
