@@ -29,7 +29,7 @@
 Implement the **per-collection local state layer** that supports:
 
 - idempotent operation
-- watermark/checkpoint persistence
+- checkpoint persistence
 - per-file retry tracking
 - safe recovery after interruption
 
@@ -39,7 +39,7 @@ This is the next correct dependency for WASAPI discovery, downloading, and sheet
 ## Why This Is the Right Next Step
 
 1. **WASAPI enumeration depends on it**
-   - The next phase needs a persisted `enumeration_watermark_store_time_max` to compute the overlap-window query boundary.
+   - The next phase needs a persisted `enumeration_checkpoint_store_time_max` to compute the overlap-window query boundary.
 
 2. **Local state is the operational source of truth**
    - The master plan explicitly treats the spreadsheet as reporting/control, not correctness-critical state.
@@ -91,7 +91,7 @@ Each `{collection_id}.json` should persist at least:
 | Field | Type | Notes |
 |---|---|---|
 | `run_id` | `str | None` | Last run to persist meaningful state for this collection |
-| `enumeration_watermark_store_time_max` | `str | None` | ISO8601 timestamp for newest `store-time` from successful full enumeration |
+| `enumeration_checkpoint_store_time_max` | `str | None` | ISO8601 timestamp for newest `store-time` from successful full enumeration |
 | `last_successful_sheet_update_time` | `str | None` | ISO8601 timestamp |
 | `recent_window_filenames` | `list[str]` | Bounded dedupe list for lookback-window overlap |
 | `per_filename_status` | `dict[str, dict]` | Manifest keyed by filename |
@@ -122,8 +122,8 @@ Recommended per-filename record:
    - JSON output should be deterministic enough for inspection and debugging.
    - Use a consistent field layout/order if practical.
 
-4. **Watermark semantics**
-   - The module should support the master-plan rule that watermark advancement happens only after successful full WASAPI enumeration.
+4. **Checkpoint semantics**
+   - The module should support the master-plan rule that checkpoint advancement happens only after successful full WASAPI enumeration.
    - This module does not need to enforce the whole WASAPI workflow yet, but it should make the correct usage obvious.
 
 5. **Fresh-run utility**
@@ -169,7 +169,7 @@ def generate_run_id(now: datetime | None = None) -> str:
     ...
 
 def compute_query_after_datetime(
-    reference_watermark: datetime | None,
+    reference_checkpoint: datetime | None,
     lookback_days: int = 30,
     now: datetime | None = None,
 ) -> datetime:
@@ -261,8 +261,8 @@ Cover at least:
    - matches `YYYYMMDD-HHMMSS-xxxx` where suffix is short random lowercase hex or similar
 
 5. **Query-after computation**
-   - watermark present: subtracts `lookback_days`
-   - watermark absent: uses `now`
+   - checkpoint present: subtracts `lookback_days`
+   - checkpoint absent: uses `now`
 
 6. **Filename-window trimming**
    - trimming preserves newest entries and respects max size
@@ -323,8 +323,8 @@ The next implementation should preserve these architectural directions:
 Likely next step after this one is complete:
 
 - implement the WASAPI query wrapper that consumes `CollectionState`
-- use the saved watermark to compute `store-time-after`
-- update and persist watermark only after successful full pagination
+- use the saved checkpoint to compute `store-time-after`
+- update and persist checkpoint only after successful full pagination
 
 ---
 ## Appendix: Direct References from the Master Plan
@@ -340,5 +340,5 @@ From the master plan's local-state section:
 
 From the master plan's query-boundary section:
 
-> Start with a reference watermark = `max(local_state.enumeration_watermark_store_time_max, sheet.last_wasapi_fetch)` if both exist.
-> Compute: `after_datetime = reference_watermark - lookback_window`.
+> Start with a reference checkpoint = `max(local_state.enumeration_checkpoint_store_time_max, sheet.last_wasapi_fetch)` if both exist.
+> Compute: `after_datetime = reference_checkpoint - lookback_window`.

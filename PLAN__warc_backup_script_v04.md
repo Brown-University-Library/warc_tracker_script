@@ -53,34 +53,34 @@ To make store-time checkpointing **robust** (avoid “I didn’t observe it on a
 
 **Per-collection local state must include (minimum):**
 
-- `enumeration_watermark_store_time_max`  
+- `enumeration_checkpoint_store_time_max`  
   Newest `store-time` observed from a **successful full enumeration** of WASAPI results.
 - `store_time_lookback_days = 30` (configurable, default 30)
 - `recent_window_filenames`  
   A bounded set of filenames whose `store-time` falls within  
-  `[enumeration_watermark_store_time_max - lookback, enumeration_watermark_store_time_max]`.
+  `[enumeration_checkpoint_store_time_max - lookback, enumeration_checkpoint_store_time_max]`.
 - `per_filename_status` (manifest)  
   For each filename you have attempted or downloaded: `status` (`downloaded`/`failed`/`missing`), `last_attempt_at`, `error_count`, and (optionally) `last_error_summary`.
 
 **How each run computes the query “after” time**
 
-- Start with a *reference watermark* = `max(local_state.enumeration_watermark_store_time_max, sheet.last_wasapi_fetch)` if both exist.
-- Compute: `after_datetime = reference_watermark - lookback_window`.
+- Start with a *reference checkpoint* = `max(local_state.enumeration_checkpoint_store_time_max, sheet.last_wasapi_fetch)` if both exist.
+- Compute: `after_datetime = reference_checkpoint - lookback_window`.
 
 The query is still store-time-only, but the overlap window ensures that anything missed earlier (pagination/transient issues) can be rediscovered.
 
-**When to advance the local watermark**
+**When to advance the local checkpoint**
 
-- Advance `enumeration_watermark_store_time_max` only after:
+- Advance `enumeration_checkpoint_store_time_max` only after:
   - WASAPI pagination completes successfully, and
   - state is written durably.
-- Download failures do **not** prevent watermark advance, because the overlap-window + per-file manifest is what guarantees retry.
+- Download failures do **not** prevent checkpoint advance, because the overlap-window + per-file manifest is what guarantees retry.
 
 **Critical integrity rule**
 
 - If a WASAPI record is missing `store-time`, treat it as an integrity error:
   - log and record the filename for manual review,
-  - do not use it to advance the watermark.
+  - do not use it to advance the checkpoint.
 
 Design goal: checkpointing guarantees **idempotency** and supports **safe retry** after interruption.
 
@@ -131,23 +131,23 @@ Checkpointing must be overlap-window safe.
 
 Per collection:
 
-1. Determine a **reference watermark**:
-   - `reference_watermark = max(local_state.enumeration_watermark_store_time_max, sheet.last_wasapi_fetch_datetime)` (when both exist)
-   - If neither exists (first run): `reference_watermark = NOW`
+1. Determine a **reference checkpoint**:
+   - `reference_checkpoint = max(local_state.enumeration_checkpoint_store_time_max, sheet.last_wasapi_fetch_datetime)` (when both exist)
+   - If neither exists (first run): `reference_checkpoint = NOW`
 2. Use a **30-day lookback** to compute the query boundary:
-   - `after_datetime = reference_watermark - 30 days`
+   - `after_datetime = reference_checkpoint - 30 days`
 3. Query WASAPI with:
    - `store-time-after=<after_datetime>` (treat as **exclusive**)
 4. **Deduplicate by filename** and consult the local manifest:
    - Download only if missing / failed / unverifiable locally.
 5. After a **successful full enumeration** (pagination complete), set:
-   - `local_state.enumeration_watermark_store_time_max = max(store-time observed in this run)`  
+   - `local_state.enumeration_checkpoint_store_time_max = max(store-time observed in this run)`  
      (even if some downloads fail; failures are retried via manifest + overlap)
    - Update `recent_window_filenames` to include filenames in the newest lookback window.
 
 ### Why the overlap window is required 
 
-If a prior run’s enumeration is incomplete (paging interrupted, transient API error, etc.) and you advance the watermark to the newest observed store-time, a missed file whose store-time is older than the watermark can be skipped forever **unless** you re-scan a bounded time window and dedupe by filename.
+If a prior run’s enumeration is incomplete (paging interrupted, transient API error, etc.) and you advance the checkpoint to the newest observed store-time, a missed file whose store-time is older than the checkpoint can be skipped forever **unless** you re-scan a bounded time window and dedupe by filename.
 
 ### Decisions / questions (remaining)
 
@@ -178,7 +178,7 @@ For each active collection:
    - `store-time-after=<after_datetime>`
 3. Page through results until exhausted:
    - Use `page` / `page_size` or follow `next` links.
-   - Treat “pagination did not complete” as a run failure; do not advance the local watermark.
+   - Treat “pagination did not complete” as a run failure; do not advance the local checkpoint.
 
 For each result file record, capture:
 
@@ -189,7 +189,7 @@ For each result file record, capture:
 - `locations[0]` primary download URL (Archive‑It storage)
 - `locations[1]` backup download URL (archive.org), if present
 
-**Integrity rule:** if `store-time` is missing, record and surface the issue; do not use that record to advance watermark.
+**Integrity rule:** if `store-time` is missing, record and surface the issue; do not use that record to advance the checkpoint.
 
 ### Determining “needs download”
 
@@ -524,7 +524,7 @@ This cleanly separates:
 2. Implement sheet ingestion that:
    - detects header row by name matching
    - maps to canonical internal schema
-3. Implement per-collection local state file (watermark + manifest + recent filename window).
+3. Implement per-collection local state file (checkpoint + manifest + recent filename window).
 4. Implement WASAPI query wrapper:
    - filters by collection and computed `after_datetime` (store-time only; default 30-day overlap)
    - handles pagination robustly
