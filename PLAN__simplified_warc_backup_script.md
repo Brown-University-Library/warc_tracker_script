@@ -30,16 +30,16 @@ Completed so far:
 - WASAPI discovery helpers exist in `lib/wasapi_discovery.py`, including `store-time` overlap-window boundary computation, paginated record enumeration, and max `store-time` tracking
 - local WARC/fixity path-building helpers exist in `lib/storage_layout.py`, including year/month partition extraction from WARC filenames and planned destination/sidecar path construction
 - a production downloader exists in `lib/downloader.py`; it streams with `httpx`, writes to `*.partial`, removes stale partial files on retry, atomically renames successful downloads into place, and returns explicit success/failure results
+- a production fixity module exists in `lib/fixity.py`; it computes SHA-256 for downloaded WARCs, writes `.sha256` and `.json` sidecars atomically, and returns explicit success/failure results
 - a temporary investigative WASAPI metadata-capture script exists in `tmp_inspect_collection_wasapi.py`
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
-- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, downloads WARC files sequentially to planned destinations, and logs per-collection download summaries
+- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, downloads WARC files sequentially to planned destinations, generates fixity sidecars after successful downloads, and logs per-collection download/fixity summaries
 - Archive-It credential loading and storage-root resolution exist in `lib/orchestration.py`
-- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, production orchestration helpers, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
+- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, fixity helpers, production orchestration helpers, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
 
 Not yet implemented in the production backup flow:
 
-- SHA-256/fixity writing
-- durable file-manifest updates beyond the enumeration checkpoint
+- durable file-manifest updates for download and fixity success/failure
 - spreadsheet write/update behavior
 - Trio orchestration with two dedicated download workers and a separate sheet updater
 
@@ -171,7 +171,7 @@ For MVP:
 4. Write fixity sidecar
 5. Update local manifest
 
-The current production code implements steps 1 and 2. Steps 3 through 5 remain to be added.
+The current production code implements steps 1 through 4. Step 5 remains to be added.
 
 If interrupted, leave the partial file and delete/retry it on the next run.
 
@@ -352,15 +352,16 @@ Keep this minimal and practical.
 5. [x] Integrate sheet ingestion, local state, and WASAPI discovery into the current sequential production orchestration flow.
 6. [x] Implement local path building using the year/month collection layout.
 7. [x] Implement downloader with temp-file then atomic rename.
-8. Implement SHA-256 sidecar writing.
-9. Implement the `Trio` flow:
+8. [x] Implement SHA-256 sidecar writing.
+9. Implement durable local manifest updates for download and fixity outcomes.
+10. Implement spreadsheet write/update behavior.
+11. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
    - download worker 2
    - sheet updater
-10. Implement spreadsheet write/update behavior.
-11. Add lock and cron wrapper.
-12. Run on a small set of collections before scaling up.
+12. Add lock and cron wrapper.
+13. Run on a small set of collections before scaling up.
 
 ---
 
