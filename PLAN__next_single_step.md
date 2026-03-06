@@ -2,35 +2,77 @@
 
 ## Context for Future Agents
 
-**Code-Directives**: review `warc_tracker_script/AGENTS.md` for code-directives to follow.
+**Code-directives**: review `warc_tracker_script/AGENTS.md` before editing code.
 
-**Project**: warc_tracker_script — A cron-triggered WARC backup + tracking-sheet update system
+**Master plan reference**: `warc_tracker_script/PLAN__warc_backup_script_v04.md`
 
-**Plan Reference**: `PLAN__warc_backup_script_v04.md` (the master plan)
+**Current implementation status**:
 
-**Current State**: Sheet ingestion is complete. The script can read Google Sheets and identify active collections.
+- Sheet ingestion is already implemented in `warc_tracker_script/lib/collection_sheet.py`.
+- The manager/orchestrator is currently minimal in `warc_tracker_script/main.py`.
+- `main.py` currently does only three things:
+  - loads `.env`
+  - validates `GSHEET_SPREADSHEET_ID`
+  - calls `fetch_collection_jobs(spreadsheet_id)` and logs the active collection count
+
+**Important current code facts**:
+
+- `lib/collection_sheet.py` already defines `CollectionJob` as the canonical collection-level work unit.
+- Header-row detection and active-row filtering are already working.
+- The project uses Python `3.12` per `pyproject.toml`.
+- Tests should use `unittest`, not `pytest`.
+- `ruff.toml` uses single quotes and a max line length of `125`.
 
 ---
-
 ## Goal of This Step
 
-Implement the **per-collection local state file system** that supports idempotent operation, checkpointing, and recovery. This is the foundation for all subsequent pipeline stages (WASAPI querying, downloading, sheet updating).
+Implement the **per-collection local state layer** that supports:
+
+- idempotent operation
+- watermark/checkpoint persistence
+- per-file retry tracking
+- safe recovery after interruption
+
+This is the next correct dependency for WASAPI discovery, downloading, and sheet-update orchestration.
 
 ---
+## Why This Is the Right Next Step
 
-## Why This Step First
+1. **WASAPI enumeration depends on it**
+   - The next phase needs a persisted `enumeration_watermark_store_time_max` to compute the overlap-window query boundary.
 
-1. **Downstream Dependency**: WASAPI discovery needs to know the `enumeration_watermark_store_time_max` to compute the 30-day overlap window
-2. **Idempotency Requirement**: The script must survive interruptions without re-downloading files
-3. **Recovery Semantics**: The local state (not the spreadsheet) is the source of truth for "what's already been processed"
+2. **Local state is the operational source of truth**
+   - The master plan explicitly treats the spreadsheet as reporting/control, not correctness-critical state.
+
+3. **It keeps `main.py` thin**
+   - This repository already has a manager-style `main.py`; adding state logic in `lib/collection_state.py` fits the existing structure.
 
 ---
+## Scope Boundaries for This Step
 
-## Requirements (from Master Plan)
+### In scope
 
-### Directory Layout
+- Create the collection-state module.
+- Define the persisted schema and serialization/deserialization behavior.
+- Implement atomic load/save helpers.
+- Implement `run_id` generation.
+- Implement helper logic for overlap-window date calculation.
+- Add focused unit tests.
 
-```
+### Out of scope
+
+- No WASAPI HTTP client yet.
+- No download logic yet.
+- No sheet writes yet.
+- No concurrency/Trio work yet.
+- No broad refactor of `main.py` unless a very small integration hook is genuinely useful.
+
+---
+## Requirements from the Master Plan
+
+### Directory layout
+
+```text
 {root}/_state/
   run-lock/
   collections/
@@ -39,153 +81,255 @@ Implement the **per-collection local state file system** that supports idempoten
     {run_id}.json
 ```
 
-### Per-Collection State Schema
+For this step, the required deliverable is the `collections/{collection_id}.json` portion.
+The `runs/{run_id}.json` file can remain deferred unless it falls out naturally from the implementation.
 
-Each `{collection_id}.json` must contain:
+### Required per-collection state fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `run_id` | `str` | Timestamp-based identifier of last successful run (e.g., `20250305-143000-a1b2`) |
-| `enumeration_watermark_store_time_max` | `str \| None` | ISO8601 timestamp of newest `store-time` observed from successful WASAPI enumeration |
-| `last_successful_sheet_update_time` | `str \| None` | ISO8601 timestamp of last sheet update for this collection |
-| `recent_window_filenames` | `list[str]` | Bounded list (max ~1000) of filenames in the lookback window for dedupe |
-| `per_filename_status` | `dict[str, dict]` | Manifest of file attempts: `{filename: {"status": "downloaded\|failed\|missing", "last_attempt_at": "ISO8601", "error_count": int, "last_error_summary": str}}` |
-| `failure_counters` | `dict` | Aggregate failure info for the collection |
+Each `{collection_id}.json` should persist at least:
 
-### Key Behaviors
+| Field | Type | Notes |
+|---|---|---|
+| `run_id` | `str | None` | Last run to persist meaningful state for this collection |
+| `enumeration_watermark_store_time_max` | `str | None` | ISO8601 timestamp for newest `store-time` from successful full enumeration |
+| `last_successful_sheet_update_time` | `str | None` | ISO8601 timestamp |
+| `recent_window_filenames` | `list[str]` | Bounded dedupe list for lookback-window overlap |
+| `per_filename_status` | `dict[str, dict]` | Manifest keyed by filename |
+| `failure_counters` | `dict[str, int]` | Aggregate counters |
 
-1. **Atomic Writes**: State updates must be atomic (write temp file → rename) to prevent corruption on interruption
-2. **Graceful Missing State**: A collection with no state file is treated as "never processed"
-3. **Watermark Advance Rules**:
-   - Only advance `enumeration_watermark_store_time_max` after **successful full WASAPI pagination**
-   - Download failures do NOT prevent watermark advance (they retry via overlap window + manifest)
-   - Records missing `store-time` are integrity errors—do not use them to advance the watermark
+### File-status manifest shape
 
-### `run_id` Format
+Recommended per-filename record:
 
-Use timestamp-based identifiers like `20250305-143000-a1b2` (YYYYMMDD-HHMMSS-random4):
-- Enables audit trail correlation across logs, sheet updates, and state files
-- Supports tracing which run last touched a collection
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `str` | Start with `downloaded`, `failed`, or `missing` |
+| `last_attempt_at` | `str | None` | ISO8601 timestamp |
+| `error_count` | `int` | Increment on failed attempts |
+| `last_error_summary` | `str | None` | Short text only |
 
 ---
+## Behavioral Requirements
 
-## Suggested Implementation Structure
+1. **Atomic writes**
+   - Write to a temp file in the destination directory, then rename atomically.
+   - A crash/interruption must not leave a truncated JSON state file in place.
 
-Create `lib/collection_state.py` with:
+2. **Graceful missing state**
+   - If a collection has no file yet, loading should return a valid default state object.
+
+3. **Stable serialization**
+   - JSON output should be deterministic enough for inspection and debugging.
+   - Use a consistent field layout/order if practical.
+
+4. **Watermark semantics**
+   - The module should support the master-plan rule that watermark advancement happens only after successful full WASAPI enumeration.
+   - This module does not need to enforce the whole WASAPI workflow yet, but it should make the correct usage obvious.
+
+5. **Fresh-run utility**
+   - A helper for generating a timestamp-based `run_id` should exist in this step because later stages will need it immediately.
+
+---
+## Recommended Implementation Structure
+
+Create `warc_tracker_script/lib/collection_state.py`.
+
+Recommended dataclasses:
 
 ```python
-from dataclasses import dataclass
+@dataclass
+class FileStatusRecord:
+    """
+    Represents the persisted status for a single filename.
+    """
 
 @dataclass
 class CollectionState:
     """
-    Represents the persisted state for a single collection.
+    Represents persisted per-collection state.
     """
-    run_id: str | None
-    enumeration_watermark_store_time_max: str | None  # ISO8601
-    last_successful_sheet_update_time: str | None  # ISO8601
-    recent_window_filenames: list[str]
-    per_filename_status: dict[str, FileStatusRecord]
-    failure_counters: dict[str, int]
-
-@dataclass
-class FileStatusRecord:
-    """
-    Represents the status of a single file attempt.
-    """
-    status: str  # 'downloaded', 'failed', 'missing'
-    last_attempt_at: str  # ISO8601
-    error_count: int
-    last_error_summary: str | None
 ```
 
-And functions:
+Recommended functions:
 
 ```python
+def build_state_root_path(warc_backup_root: Path) -> Path:
+    ...
+
+def get_collection_state_path(state_root: Path, collection_id: int) -> Path:
+    ...
+
 def load_collection_state(state_root: Path, collection_id: int) -> CollectionState:
-    """
-    Loads state for a collection, returning default/empty state if file missing.
-    """
     ...
 
-def save_collection_state(
-    state_root: Path,
-    collection_id: int,
-    state: CollectionState,
-) -> None:
-    """
-    Atomically writes collection state to disk.
-    """
+def save_collection_state(state_root: Path, collection_id: int, state: CollectionState) -> None:
     ...
 
-def generate_run_id() -> str:
-    """
-    Generates a timestamp-based run identifier.
-    """
+def generate_run_id(now: datetime | None = None) -> str:
     ...
 
 def compute_query_after_datetime(
-    watermark: str | None,
+    reference_watermark: datetime | None,
     lookback_days: int = 30,
-) -> str:
-    """
-    Computes the 'after' datetime for WASAPI queries using overlap window.
-    """
+    now: datetime | None = None,
+) -> datetime:
     ...
 ```
 
----
+Also recommended helper functions:
 
+```python
+def collection_state_to_dict(state: CollectionState) -> dict[str, object]:
+    ...
+
+def collection_state_from_dict(data: dict[str, object]) -> CollectionState:
+    ...
+
+def trim_recent_window_filenames(filenames: list[str], max_items: int = 1000) -> list[str]:
+    ...
+```
+
+Notes:
+
+- Prefer `datetime` objects internally where possible, and serialize as ISO8601 strings at the file boundary.
+- Keeping serialization helpers explicit will make future schema evolution easier.
+- Keep the module independent from Google Sheets and HTTP code.
+
+---
+## Specific Design Recommendations
+
+### State-root decision
+
+A likely clean design is:
+
+- main backup root comes later from `WARC_BACKUP_ROOT`
+- state root is derived as `{WARC_BACKUP_ROOT}/_state`
+
+If the backup-root configuration is not implemented yet, it is acceptable in this step to keep the collection-state module path-based and let callers provide `state_root: Path` directly.
+
+Recommendation: **do not hard-wire environment-variable reads into `lib/collection_state.py`**. Keep the module pure and caller-driven.
+
+### Timestamp handling
+
+Recommendation:
+
+- store timestamps in ISO8601 form
+- prefer timezone-aware UTC datetimes in code
+- avoid mixing naive and aware datetimes
+
+### Corrupt JSON handling
+
+Recommendation:
+
+- if a state file exists but contains invalid JSON, raise a clear exception rather than silently resetting state
+- include the collection id/path in the error message
+
+This is safer for preservation work than silently discarding state.
+
+### Bounded filename window
+
+Recommendation:
+
+- keep `recent_window_filenames` insertion-ordered
+- trim to a fixed max size
+- preserve newest entries when trimming
+
+A plain `list[str]` is fine for persistence at this stage.
+
+---
 ## Test Requirements
 
-Create `tests/test_collection_state.py` covering:
+Create `warc_tracker_script/tests/test_collection_state.py` using `unittest`.
 
-1. **Happy path**: Load → modify → save → reload roundtrip
-2. **Missing state**: Loading non-existent collection returns default/empty state
-3. **Atomic write**: State file is either fully written or not present (no partial JSON)
-4. **Watermark computation**: Correct ISO8601 datetime math with 30-day lookback
-5. **Run ID format**: Valid timestamp + random suffix pattern
-6. **Filename dedupe**: `recent_window_filenames` bounded list management
+Cover at least:
+
+1. **Roundtrip persistence**
+   - load default state
+   - modify fields
+   - save
+   - reload
+   - confirm values persist
+
+2. **Missing file behavior**
+   - loading a non-existent collection returns a default `CollectionState`
+
+3. **Atomic write outcome**
+   - after save, the final JSON file exists and is valid JSON
+   - no `.tmp` / partial artifact remains
+
+4. **Run-id format**
+   - matches `YYYYMMDD-HHMMSS-xxxx` where suffix is short random lowercase hex or similar
+
+5. **Query-after computation**
+   - watermark present: subtracts `lookback_days`
+   - watermark absent: uses `now`
+
+6. **Filename-window trimming**
+   - trimming preserves newest entries and respects max size
+
+7. **Invalid JSON failure**
+   - malformed persisted JSON raises a clear exception
+
+If implementation uses helper serialization functions, test those indirectly through load/save unless a direct unit test adds real value.
 
 ---
+## Suggested Minimal Integration
 
+This step does **not** require meaningful orchestration changes in `main.py`.
+
+However, one small optional improvement would be acceptable:
+
+- add a temporary local demonstration path in tests only
+- or add a tiny, non-default smoke helper later when the WASAPI step begins
+
+Recommendation: keep this step focused on the library module + tests.
+
+---
 ## Success Criteria
 
-- [ ] `lib/collection_state.py` exists with `CollectionState` dataclass and load/save functions
-- [ ] Atomic write implementation (temp file + rename)
-- [ ] All functions have type hints and follow AGENTS.md conventions
-- [ ] `tests/test_collection_state.py` exists with passing tests
-- [ ] Can demonstrate: load state for collection → update watermark → save → reload shows new watermark
+- [ ] `warc_tracker_script/lib/collection_state.py` exists
+- [ ] `CollectionState` and `FileStatusRecord` dataclasses exist
+- [ ] default-load behavior works when no state file exists
+- [ ] atomic save behavior exists
+- [ ] `generate_run_id()` exists and is tested
+- [ ] `compute_query_after_datetime()` exists and is tested
+- [ ] `warc_tracker_script/tests/test_collection_state.py` exists
+- [ ] tests pass via `uv run ./run_tests.py` or an equivalent repo-approved unittest invocation
 
 ---
+## Handoff Notes for the Next Agent / New Session
 
-## Integration Note for Future Steps
+If you are picking this up in a new session, start by re-reading:
 
-Once this step is complete, the next step (WASAPI query wrapper) will:
-1. Call `load_collection_state()` to get the current watermark
-2. Use `compute_query_after_datetime()` to get the `store-time-after` parameter
-3. After successful pagination, update `enumeration_watermark_store_time_max` and save
+- `warc_tracker_script/AGENTS.md`
+- `warc_tracker_script/PLAN__warc_backup_script_v04.md`
+- `warc_tracker_script/main.py`
+- `warc_tracker_script/lib/collection_sheet.py`
+- `warc_tracker_script/PLAN__next_single_step.md`
 
-The downloader step will:
-1. Check `per_filename_status` before downloading
-2. Update status records after each attempt
-3. Manage `recent_window_filenames` for dedupe
+Quick mental model of the codebase right now:
+
+- `main.py` is the manager/orchestrator entry point and is intentionally very small.
+- `lib/collection_sheet.py` is the first completed library module and is a good style/template reference.
+- The project is still in early pipeline-building mode; there is not yet a WASAPI client, downloader, or state module.
+
+The next implementation should preserve these architectural directions:
+
+- keep `main.py` thin
+- put domain logic in `lib/`
+- keep new code independently testable
+- avoid prematurely coupling state code to Google Sheets or HTTP concerns
+
+Likely next step after this one is complete:
+
+- implement the WASAPI query wrapper that consumes `CollectionState`
+- use the saved watermark to compute `store-time-after`
+- update and persist watermark only after successful full pagination
 
 ---
+## Appendix: Direct References from the Master Plan
 
-## Files to Create/Modify
-
-**New files:**
-- `lib/collection_state.py` — state management logic
-- `tests/test_collection_state.py` — unit tests
-
-**No modifications to existing files required** for this step.
-
----
-
-## Appendix: Reference from Master Plan
-
-From `PLAN__warc_backup_script_v04.md` Section "Local state management without a database":
+From the master plan's local-state section:
 
 > Per-collection state JSON should include:
 > - `run_id` of last successful run (for cross-referencing)
@@ -194,7 +338,7 @@ From `PLAN__warc_backup_script_v04.md` Section "Local state management without a
 > - a record of recently downloaded filenames (bounded list)
 > - failure counters / last error summary
 
-From "How each run computes the query 'after' time":
+From the master plan's query-boundary section:
 
-> - Start with a reference watermark = `max(local_state.enumeration_watermark_store_time_max, sheet.last_wasapi_fetch)` if both exist.
-> - Compute: `after_datetime = reference_watermark - lookback_window`.
+> Start with a reference watermark = `max(local_state.enumeration_watermark_store_time_max, sheet.last_wasapi_fetch)` if both exist.
+> Compute: `after_datetime = reference_watermark - lookback_window`.
