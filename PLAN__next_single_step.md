@@ -126,15 +126,13 @@ The future script should accept at least:
 
 Optional but useful flags:
 
-- `--max-pages` to limit collection paging during exploration
 - `--log-level`
-- `--overwrite` or `--resume` behavior, if needed
 
 Recommendation:
 
 - fail clearly if required arguments are missing
-- create the output directory if it does not exist
-- refuse to overwrite existing files unless explicitly allowed, or use predictable file names that can be safely replaced
+- append a timestamped subdirectory to the supplied output-directory argument and create that destination directory
+- do not add overwrite or resume behavior for this temporary script
 
 ---
 ## Metadata to Capture
@@ -213,7 +211,7 @@ The future script should:
 
 - use `httpx`
 - authenticate using environment variables already intended for Archive-It access
-- follow WASAPI paging until all pages are retrieved, unless a deliberate exploration limit such as `--max-pages` is used
+- follow WASAPI paging until all pages are retrieved
 - log each request clearly enough that failures can be understood
 - fail clearly on authentication problems or malformed responses
 
@@ -245,7 +243,7 @@ The future script should optimize for later inspection.
 ---
 ## Recommended Derived Analysis to Include
 
-The future script should optionally compute a small derived summary to accelerate human review.
+The future script should compute a small derived summary to accelerate human review.
 
 Recommended summary sections:
 
