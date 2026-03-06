@@ -30,13 +30,18 @@ Completed so far:
 - WASAPI discovery helpers exist in `lib/wasapi_discovery.py`, including `store-time` overlap-window boundary computation, paginated record enumeration, and max `store-time` tracking
 - a temporary investigative WASAPI metadata-capture script exists in `tmp_inspect_collection_wasapi.py`
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
+- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, and logs pending download candidates
+- Archive-It credential loading and storage-root resolution exist in `lib/orchestration.py`
+- focused `unittest` coverage exists for the sheet-ingestion, local-state, production orchestration helpers, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
 
 Not yet implemented in the production backup flow:
 
-- integration of WASAPI discovery into the production backup flow in `main.py` / orchestration code
 - local year/month path building for downloaded WARCs and fixity sidecars
 - downloader and SHA-256/fixity writing
 - Trio orchestration and spreadsheet updater flow
+- durable file-manifest updates beyond the enumeration checkpoint
+- spreadsheet write/update behavior
+- Trio orchestration with two dedicated download workers and a separate sheet updater
 
 ---
 
@@ -269,6 +274,8 @@ A human-friendly combined display label such as `w1:filename` or `w2:filename` s
 
 ## Trio architecture: Option 1
 
+The current codebase does **not** implement this Trio architecture yet. The production flow is currently a simpler sequential orchestrator that performs discovery and checkpoint persistence only.
+
 Retain a simple `Trio` design with:
 
 - **two dedicated download workers**
@@ -340,16 +347,18 @@ Keep this minimal and practical.
 2. [x] Implement spreadsheet ingestion with header detection and canonical field mapping.
 3. [x] Implement per-collection local `state.json`.
 4. [x] Implement WASAPI discovery helpers with `store-time` plus 30-day overlap.
-5. Implement local path building using the year/month collection layout.
-6. Implement downloader with temp-file then atomic rename.
-7. Implement SHA-256 sidecar writing.
-8. Implement the `Trio` flow:
+5. [x] Integrate sheet ingestion, local state, and WASAPI discovery into the current sequential production orchestration flow.
+6. Implement local path building using the year/month collection layout.
+7. Implement downloader with temp-file then atomic rename.
+8. Implement SHA-256 sidecar writing.
+9. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
    - download worker 2
    - sheet updater
-9. Add lock and cron wrapper.
-10. Run on a small set of collections before scaling up.
+10. Implement spreadsheet write/update behavior.
+11. Add lock and cron wrapper.
+12. Run on a small set of collections before scaling up.
 
 ---
 
