@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 
 import dotenv
 
@@ -8,14 +9,20 @@ from lib.collection_sheet import fetch_collection_jobs
 dotenv.load_dotenv()
 
 LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
+LOG_FILE_PATH: Path = Path(__file__).resolve().parent / 'logs' / 'warc_tracker_script.log'
 
 
 ## setup logging
 log_level = getattr(logging, LOG_LEVEL)  # maps the string name to the corresponding logging level constant
+LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=log_level,
     format='[%(asctime)s] %(levelname)s [%(module)s-%(funcName)s()::%(lineno)d] %(message)s',
     datefmt='%d/%b/%Y %H:%M:%S',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE_PATH),
+    ],
 )
 log = logging.getLogger(__name__)
 
