@@ -14,7 +14,7 @@ from lib.collection_sheet import CollectionJob
 from lib.orchestration import (
     count_pending_download_candidates,
     get_archive_it_credentials,
-    get_storage_root,
+    get_downloaded_storage_root,
     process_collection_job,
 )
 
@@ -29,7 +29,7 @@ class TestGetStorageRoot(TestCase):
         Checks that the configured storage root comes from the environment.
         """
         with patch.dict(os.environ, {'WARC_STORAGE_ROOT': '~/warc-root'}, clear=False):
-            result = get_storage_root()
+            result = get_downloaded_storage_root()
 
         self.assertEqual(result, Path('~/warc-root').expanduser())
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import dotenv
 
-from lib.orchestration import get_archive_it_credentials, get_storage_root, run_collection_orchestration
+from lib.orchestration import get_archive_it_credentials, get_downloaded_storage_root, run_collection_orchestration
 from lib.wasapi_discovery import DEFAULT_WASAPI_BASE_URL
 
 dotenv.load_dotenv()
@@ -32,11 +32,11 @@ def main() -> None:
     """
     Orchestrates the current sheet, state, and WASAPI discovery flow.
     """
+    ## get environment variables ------------------------------------
     spreadsheet_id: str | None = os.getenv('GSHEET_SPREADSHEET_ID')
     if spreadsheet_id is None:
         log.error('Missing GSHEET_SPREADSHEET_ID environment variable.')
         return None
-
     archive_it_credentials = get_archive_it_credentials()
     if archive_it_credentials is None:
         log.error(
@@ -44,10 +44,10 @@ def main() -> None:
             'ARCHIVEIT_USER/ARCHIVEIT_PASS.',
         )
         return None
-
-    storage_root = get_storage_root()
+    downloaded_storage_root = get_downloaded_storage_root()
     wasapi_base_url = os.getenv('ARCHIVEIT_WASAPI_BASE_URL', DEFAULT_WASAPI_BASE_URL)
-    run_collection_orchestration(spreadsheet_id, storage_root, wasapi_base_url, archive_it_credentials)
+
+    run_collection_orchestration(spreadsheet_id, downloaded_storage_root, wasapi_base_url, archive_it_credentials)
     return None
 
 

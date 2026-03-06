@@ -14,7 +14,7 @@ DEFAULT_STORAGE_ROOT: Path = Path(__file__).resolve().parent.parent / 'storage'
 log = logging.getLogger(__name__)
 
 
-def get_storage_root() -> Path:
+def get_downloaded_storage_root() -> Path:
     """
     Returns the configured local storage root.
     """
