@@ -97,7 +97,7 @@ class TestParseCollectionJobs(TestCase):
                 'sum--Last-Check-Timestamp',
                 'sum--Downloaded-WARCs-Count',
                 'sum--Downloaded-WARCs-Size',
-                'sum--Dowlnloaded-WARCs-Server-Path',
+                'sum--Downloaded-WARCs-Server-Path',
             ],
             ['123', 'Active', '', '', '', '', '', ''],
         ]

@@ -44,7 +44,7 @@ HEADER_ALIASES: dict[str, set[str]] = {
     },
     'summary_status_server_path': {
         'summary_status_server_path',
-        'sum--dowlnloaded-warcs-server-path',
+        'sum--downloaded-warcs-server-path',
     },
 }
 
