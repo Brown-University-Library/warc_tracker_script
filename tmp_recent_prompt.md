@@ -1,0 +1,4 @@
+- review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
+- update the main plan at `warc_tracker_script/PLAN__simplified_warc_backup_script.md` with what's been done, and what hasn't been done.
+- determine a good next step and save it to `warc_tracker_script/PLAN__next_single_step.md`, overwriting that file's previous content.
+- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`.

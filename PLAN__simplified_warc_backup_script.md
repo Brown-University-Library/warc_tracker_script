@@ -39,8 +39,9 @@ Completed so far:
 
 Not yet implemented in the production backup flow:
 
-- spreadsheet write/update behavior
+- spreadsheet write/update behavior, including up-front validation of required reporting columns and collection-level start/final status writes
 - Trio orchestration with two dedicated download workers and a separate sheet updater
+- lock and cron wrapper hardening
 
 ---
 
@@ -581,6 +582,8 @@ Keep this minimal and practical.
 8. [x] Implement SHA-256 sidecar writing.
 9. [x] Implement durable local manifest updates for download and fixity outcomes.
 10. Implement spreadsheet write/update behavior.
+   - first slice: validate required reporting columns up front and write collection-level start/final status updates from the existing sequential flow
+   - later slice: add mid-download progress reporting and move sheet writes behind the dedicated sheet-updater task
 11. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
