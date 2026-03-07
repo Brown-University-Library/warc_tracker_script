@@ -1,17 +1,5 @@
-- review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
-- review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them.
-- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
-
-- I've added the following columns to the spreadsheet (the 'sum' stands for "summary"):
-  - Status-Main	
-  - Status-Detail	
-  - sum--Last-Check-Timestamp
-  - sum--Downloaded-WARCs-Count
-  - sum--Downloaded-WARCs-Size
-  - sum--Dowlnloaded-WARCs-Server-Path
-- These column-labels are in row-3.
-- Review `warc_tracker_script/AGENTS.md` for coding-directives.
-- Review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` to understand what's been done and not-done.
-- Update relevant spreadsheet-code-files to expect those columns/names.
+- review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of this script.
+- the purpose of this script is to have a local backup of archivit warc-files.
+- the existing 30-day lookback will not achieve this, if no files have been downloaded recently.
+- propose 3 options for how to handle this situation, and save the options to `warc_tracker_script/PLAN__handling_historical_warcs.md`
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
