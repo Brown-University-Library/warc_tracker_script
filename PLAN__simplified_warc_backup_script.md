@@ -387,7 +387,7 @@ Cons:
 
 Recommendation:
 
-- **preferred MVP option**
+- **preferred MVP option** -- USER-UPDATE: we'll use this Option.
 
 #### Option C: `status_main` plus structured detail fields
 
@@ -424,13 +424,13 @@ Recommendation for the spreadsheet-update layer:
 1. validate required configuration and credentials at startup
 2. validate spreadsheet connectivity before collection processing begins
 3. validate required source worksheet headers before selecting active collections
-4. validate expected status-reporting fields before significant download work begins
+4. validate expected status-reporting fields before significant download work begins -- USER-UPDATE: if by this you mean "validate all existing content-entries", then I'd say "no", because this give us flexibility to change the code to write more useful `status_main` entries later. If, though, you mean "validate that the fields we need to write to exist", then I'd say "yes".
 5. fail early when a required field for the chosen MVP design is missing
 
 However, there is one important scope distinction:
 
 - **required input fields** should fail early
-- **optional reporting/detail fields** can degrade gracefully
+- **optional reporting/detail fields** can degrade gracefully -- USER-UPDATE: I don't know what you mean by this. I like expecting the `status_main` column, _AND_ the `status_detail` column to definitely exist. Clarify or remove this.
 
 Recommended MVP split:
 
@@ -474,6 +474,8 @@ For better granularity than only start/end, the collection-level lifecycle shoul
    - `spreadsheet-update-failed`
 
 This gives useful operational checkpoints without turning the sheet into a per-file event log.
+
+USER-UPDATE: `downloading-in-progress`, while a good `status_main` value, is not enough on its own. If you don't want super-granularity in the `status_detail` field, i'd like a 20-40-60-80 percentage-of-files-downloaded -- or something similar.
 
 ### Recommendation on write frequency
 
