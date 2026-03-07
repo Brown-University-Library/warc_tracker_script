@@ -1,6 +1,4 @@
-- @[/Users/birkin/Documents/Brown_Library/warc_tracker_script_stuff/warc_tracker_script/PLAN__handling_historical_warcs.md:L19] 
-- i definitely like "Option 1: full backfill on first run".
 - review `warc_tracker_script/AGENTS.md` for code-directives to follow.
-- review the main-plan at `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the existing code, what's been done, and what needs to be done.
-- update that main-plan with the option-1 logic.
+- review the main plan at `warc_tracker_script/PLAN__simplified_warc_backup_script.md`.
+- create a thorough next-step plan to add code to handle initial-downloads, and save it to `warc_tracker_script/PLAN__next_single_step.md`, overwriting any previous contents of that file.
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
