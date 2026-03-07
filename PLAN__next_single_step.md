@@ -8,75 +8,126 @@
 
 **User preference**: build functionality sequentially from `warc_tracker_script/main.py` when possible, while keeping `main.py` thin and orchestration-focused.
 
-**Current implementation status**:
+**Current implementation status from the master plan**:
 
-- `main.py` remains a thin entry point that loads config, configures logging, opens an authenticated `httpx.Client`, and iterates collection jobs.
-- `lib/orchestration.py` processes collections sequentially.
-- `lib/collection_sheet.py` loads active collection jobs from the spreadsheet.
-- `lib/local_state.py` loads and saves `state.json` atomically and now records durable per-file download/fixity outcomes.
-- `lib/wasapi_discovery.py` performs production WASAPI discovery with overlap-window checkpoint logic.
-- `lib/storage_layout.py` derives year/month partitions from WARC filenames and computes planned WARC/fixity destinations.
-- `lib/downloader.py` streams WARC files, writes to `*.partial`, removes stale partial files on retry, and atomically renames successful downloads into place.
-- `lib/fixity.py` computes SHA-256 and writes `.sha256` and `.json` sidecars for successfully downloaded WARCs.
-- The production flow now reaches local download, fixity creation, and durable manifest/state updates, but it still does not write collection-level progress or summary updates back to the spreadsheet.
+- completed: env/config loading, logging, sheet ingestion, local `state.json`, WASAPI discovery, storage layout, downloader, fixity generation, durable manifest updates, and the sequential production orchestration flow
+- not yet implemented in production: spreadsheet write/update behavior, Trio concurrency with two download workers plus a separate sheet updater, and later lock/cron hardening
 
 ---
 ## Goal of This Step
 
-Implement the first production version of **spreadsheet write/update behavior** so the script can report collection progress and completion status back to the tracking sheet while keeping the local filesystem state as the source of truth.
+Implement the **first concrete slice** of spreadsheet reporting in the existing sequential flow:
 
-This step should add a small sheet-update layer that can:
+1. validate the required spreadsheet reporting columns up front
+2. write collection-level **start** and **final** status updates
+3. keep `main.py` thin and leave Trio work for the following step
 
-- write an in-progress marker when a collection starts processing
-- write a final collection summary when processing finishes
-- update a small set of collection-level sheet fields if they are present
-- keep spreadsheet logic out of `main.py`
-- keep the implementation sequential for now
-
-This step should **not** yet implement Trio concurrency or the separate async sheet-updater task.
+This is narrower than “all spreadsheet behavior,” but it is the best next single step because it establishes the spreadsheet contract and the sequential integration points that later progress updates and the async sheet-updater can reuse.
 
 ---
 ## Why This Is the Right Next Step
 
-1. **It directly follows the updated implementation sequence**
-   - Discovery is done.
-   - Path planning is done.
-   - Downloading is done.
-   - Fixity generation is done.
-   - Durable manifest/state recording is done.
-   - The next missing production behavior is spreadsheet reporting.
+1. **It follows the implementation sequence exactly**
+   - the plan marks spreadsheet behavior as the next unfinished production feature after download/fixity/state work
 
-2. **It matches the master plan’s intended control/reporting surface**
-   - The spreadsheet is meant to show start, progress, and summary information.
-   - Local state already holds the correctness data needed to compute summary writes.
+2. **It aligns with the plan’s stricter spreadsheet contract**
+   - the detailed spreadsheet section now says the script should validate required reporting fields early, before significant processing begins
 
-3. **It fits the existing thin-`main.py` sequential flow**
-   - `main.py` can remain orchestration-only.
-   - `lib/orchestration.py` can call a small sheet-update helper layer at clear checkpoints.
+3. **It keeps the change small and architecturaly clean**
+   - add the reporting contract and the first start/final writes now
+   - defer progress batching and Trio queue/task structure until the reporting interface exists
 
-4. **It preserves a small implementation increment**
-   - Spreadsheet behavior can be validated before introducing Trio workers or a separate sheet-updater task.
+4. **It matches the repo guidance and user preference**
+   - keep `main.py` orchestration-only
+   - put substantive sheet-write logic into `lib/`
 
 ---
-## In-Scope Deliverables
+## Specific Deliverable for This Step
 
-Update the sheet-integration layer and orchestration flow so the current sequential production path can, for each processed collection:
+Extend the current sequential production flow so that, before meaningful collection processing starts, production code validates the presence of these required worksheet columns:
 
-- identify the target collection row using existing collection-job data
-- write an **In Progress** marker when collection processing begins
-- write a final summary update when collection processing finishes
-- clear the in-progress marker at the end
-- write a small set of collection-level fields when the corresponding columns are present
+- `processing_status_main`
+- `processing_status_detail`
+- `summary_status_last_wasapi_check`
+- `summary_status_downloaded_warcs_count`
+- `summary_status_downloaded`
+- `summary_status_server_path`
 
-Likely fields to support first:
+Then, for each processed collection in the sequential flow:
 
-- `Server File path- collection level`
-- `Last WASAPI fetch`
-- `File Count ?`
-- `Total Size`
-- `In Progress marker`
+- write a **start** status such as `discovery-in-progress`
+- write a **final** status/outcome plus summary values when processing ends
+- keep the sheet as reporting/control only, with local files and `state.json` remaining the source of truth
 
-And add focused tests, likely in:
+This step should explicitly **not** try to implement mid-download progress milestones or the separate async sheet-updater yet.
+
+---
+## Required Behavior from the Master Plan
+
+### Startup validation
+
+Before significant discovery/download processing begins, fail early with a clear error if any required reporting column is missing.
+
+This step should turn the plan’s required TODO into production behavior.
+
+### Status model to use now
+
+Use the bounded `processing_status_main` approach described in the plan.
+
+For this step, the minimum useful statuses are:
+
+- `discovery-in-progress`
+- `download-planning-complete` or `no-new-files-to-download`, as appropriate
+- `downloaded-without-errors`
+- `completed-with-some-file-failures`
+- `discovery-failed`
+- `spreadsheet-update-failed` when necessary
+
+`processing_status_detail` should stay compact and human-readable.
+
+### Summary values to write now
+
+At minimum, final writes should populate the required summary fields from the finished sequential run outcome:
+
+- `summary_status_last_wasapi_check`
+- `summary_status_downloaded_warcs_count`
+- `summary_status_downloaded`
+- `summary_status_server_path`
+
+---
+## Suggested Code Shape
+
+Keep the implementation explicit and small.
+
+Probable shape:
+
+- add spreadsheet reporting/validation helpers in `lib/collection_sheet.py` or a small neighboring `lib/` module
+- call those helpers from `lib/orchestration.py` at startup and at per-collection start/final checkpoints
+- do not move business logic into `main.py`
+
+The code should reuse existing row-identification metadata from sheet ingestion rather than inventing a second lookup path.
+
+---
+## Minimum Test Coverage
+
+Add focused `unittest` coverage for:
+
+- **required-column validation**
+  - missing required reporting columns fail early with a clear error
+
+- **start status write**
+  - sequential collection processing sends the expected start status payload
+
+- **final status write**
+  - successful processing sends the expected final status and summary payload
+
+- **failure-path status write**
+  - discovery failure or file-failure outcomes map to the correct final status
+
+- **sheet-write failure handling**
+  - spreadsheet write failures are surfaced clearly without corrupting local manifest/file state
+
+Likely test files:
 
 - `warc_tracker_script/tests/test_collection_sheet.py`
 - `warc_tracker_script/tests/test_orchestration.py`
@@ -84,125 +135,27 @@ And add focused tests, likely in:
 ---
 ## Out of Scope for This Step
 
-- No Trio concurrency.
-- No separate async sheet-updater worker.
-- No redesign of `main.py`.
-- No per-file sheet writes.
-- No remote checksum comparison.
-
----
-## Required Behavior from the Master Plan
-
-### When to write
-
-For each collection, the implementation should support:
-
-1. writing an **In Progress** marker when processing begins
-2. writing a final summary update when processing finishes
-3. clearing the in-progress marker at the end
-
-For this step, it is acceptable to defer mid-download progress batching and implement only start/final writes in the current sequential flow.
-
-### What to write
-
-At collection level, update only a small set of fields if they are present:
-
-- `Server File path- collection level`
-- `Last WASAPI fetch`
-- `File Count ?`
-- `Total Size`
-- `In Progress marker`
-
-The implementation should tolerate missing columns and avoid failing the whole collection just because one expected reporting column is absent.
-
-### Source-of-truth rule
-
-- local filesystem state remains the source of truth
-- spreadsheet writes are reporting/control only
-- spreadsheet write failures should be logged clearly
-- spreadsheet write failures should not erase local files or manifest state
-
----
-## Recommended API Shape
-
-Keep the change small and explicit. Illustrative directions:
-
-```python
-def build_collection_summary_update(...) -> dict[str, object]:
-    ...
-
-
-def write_collection_progress_update(... ) -> None:
-    ...
-```
-
-Exact naming can vary if the interface stays simple and testable.
-
-It is acceptable to add a small helper module under `lib/` for spreadsheet write behavior if that keeps orchestration readable.
-
----
-## Orchestration Integration Requirement
-
-Extend the current sequential flow in `lib/orchestration.py` so that it can:
-
-1. write a start marker before discovery/download work begins
-2. process the collection through the existing sequential flow
-3. compute a collection-level summary from the run results and local paths
-4. write a final collection summary at the end
-5. clear the in-progress marker before returning
-6. preserve the existing thin `main.py` approach
-
-Do this without introducing Trio worker structure yet.
-
----
-## Test Requirements
-
-Add focused `unittest` coverage.
-
-### Minimum tests to include
-
-- **Start marker write**
-  - collection processing triggers an in-progress update
-
-- **Final summary write**
-  - successful collection processing writes the expected collection-level summary payload
-
-- **Missing-column tolerance**
-  - absent optional sheet columns do not crash the reporting flow
-
-- **Spreadsheet write failure handling**
-  - write failures are surfaced clearly without breaking local manifest/file state behavior unless explicitly intended
-
-- **Orchestration integration**
-  - sequential collection processing invokes the sheet update layer at start and finish
-
-Keep tests local and mocked where appropriate; do not add live network or live Google Sheets tests.
-
----
-## Suggested Implementation Notes
-
-- Keep `main.py` thin.
-- Prefer small helper functions in `lib/collection_sheet.py` or a nearby `lib/` helper module rather than embedding sheet-write logic inline.
-- Reuse existing collection row metadata from sheet ingestion rather than re-discovering rows in an ad hoc way.
-- Keep write payloads explicit and small.
-- Match repository style from `AGENTS.md` and `ruff.toml`.
-- Log spreadsheet write failures clearly, but keep local-state durability separate.
+- Trio concurrency
+- dedicated async sheet-updater task
+- mid-download progress milestones such as `20%`, `40%`, `60%`, `80%`
+- lock/cron wrapper work
+- any redesign of the existing sequential downloader/fixity flow
 
 ---
 ## Success Criteria
 
-- [ ] collection processing writes an in-progress marker to the spreadsheet
-- [ ] collection processing writes a final summary update to the spreadsheet
-- [ ] the in-progress marker is cleared at the end of processing
-- [ ] the implementation tolerates missing optional sheet columns
-- [ ] focused `unittest` coverage exists for the new write/update behavior
+- [ ] startup validation checks for all six required reporting columns before significant processing begins
+- [ ] sequential collection processing writes a start status to the spreadsheet
+- [ ] sequential collection processing writes a final status plus required summary fields
+- [ ] sheet-write failures are logged and surfaced without undoing local durable state
+- [ ] focused `unittest` coverage exists for validation plus start/final reporting behavior
 
 ---
 ## Likely Follow-Up After This Step
 
-After spreadsheet write/update behavior is implemented, the next step should likely be:
+After this step, the next best step should be:
 
-1. implement the `Trio` flow with two download workers plus a separate sheet updater
+1. implement the `Trio` flow with two dedicated download workers and a separate sheet-updater task
 2. then add lock/cron hardening
 
 ---
@@ -214,10 +167,10 @@ If you are picking this up in a new session, re-read:
 - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
 - `warc_tracker_script/PLAN__next_single_step.md`
 
-Quick mental model of the codebase right now:
+Quick mental model:
 
-- `main.py` is a thin entry point and should stay that way.
-- `lib/orchestration.py` is the current sequential production flow.
-- `lib/local_state.py` now persists per-file manifest outcomes durably.
-- `lib/collection_sheet.py` already handles sheet ingestion and is the most likely home for small reporting/write helpers unless a separate `lib/` helper proves cleaner.
-- The immediate objective is to add the smallest correct spreadsheet update layer that plugs into the existing sequential orchestration flow and reports collection-level start/final status without introducing async structure yet.
+- `main.py` should remain thin
+- `lib/orchestration.py` is the current sequential production spine
+- the next implementation target is not Trio yet; it is the spreadsheet reporting contract plus start/final status integration in the sequential flow
+- once that contract exists, progress batching and the async sheet-updater become much easier to add cleanly
+
