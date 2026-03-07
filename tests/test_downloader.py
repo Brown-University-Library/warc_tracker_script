@@ -10,7 +10,7 @@ import httpx
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from lib.collection_sheet import CollectionJob
+from lib.collection_sheet import CollectionJob, HeaderLocation
 from lib.downloader import build_partial_download_path, download_to_path
 from lib.orchestration import build_planned_downloads, process_collection_job
 
@@ -137,6 +137,18 @@ class TestOrchestrationDownloadConsumption(TestCase):
             row_number=7,
         )
         client = MagicMock(spec=httpx.Client)
+        worksheet = MagicMock()
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 0,
+                'processing_status_detail': 1,
+                'summary_status_last_wasapi_check': 2,
+                'summary_status_downloaded_warcs_count': 3,
+                'summary_status_downloaded': 4,
+                'summary_status_server_path': 5,
+            },
+        )
         discovery_result = MagicMock()
         discovery_result.records = [
             {
@@ -166,9 +178,20 @@ class TestOrchestrationDownloadConsumption(TestCase):
             patch('lib.orchestration.log_planned_download_paths'),
             patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
             patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
+            patch('lib.orchestration.update_collection_processing_status'),
+            patch('lib.orchestration.update_collection_final_reporting'),
+            patch('lib.orchestration.datetime') as mock_datetime,
         ):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
-            process_collection_job(client, collection_job, Path('/tmp/storage'), 'https://example.org/wasapi')
+            mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+            process_collection_job(
+                client,
+                collection_job,
+                Path('/tmp/storage'),
+                'https://example.org/wasapi',
+                worksheet,
+                header_location,
+            )
 
         self.assertEqual(mock_download.call_count, 1)
         self.assertEqual(mock_download.call_args.args[1], 'https://example.org/alpha.warc.gz')

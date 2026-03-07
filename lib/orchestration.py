@@ -4,9 +4,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import gspread
 import httpx
 
-from lib.collection_sheet import CollectionJob
+from lib.collection_sheet import (
+    CollectionJob,
+    CollectionProcessingStatusUpdate,
+    CollectionSummaryUpdate,
+    HeaderLocation,
+    update_collection_final_reporting,
+    update_collection_processing_status,
+)
 from lib.downloader import DownloadResult, download_to_path
 from lib.fixity import FixityResult, write_fixity_sidecars
 from lib.local_state import (
@@ -22,6 +30,13 @@ DEFAULT_STORAGE_ROOT: Path = Path(__file__).resolve().parent.parent / 'storage'
 
 log = logging.getLogger(__name__)
 
+STATUS_DISCOVERY_IN_PROGRESS = 'discovery-in-progress'
+STATUS_NO_NEW_FILES_TO_DOWNLOAD = 'no-new-files-to-download'
+STATUS_DOWNLOADED_WITHOUT_ERRORS = 'downloaded-without-errors'
+STATUS_COMPLETED_WITH_SOME_FILE_FAILURES = 'completed-with-some-file-failures'
+STATUS_DISCOVERY_FAILED = 'discovery-failed'
+STATUS_SPREADSHEET_UPDATE_FAILED = 'spreadsheet-update-failed'
+
 
 @dataclass(frozen=True)
 class PlannedDownload:
@@ -32,6 +47,16 @@ class PlannedDownload:
     filename: str
     source_url: str
     planned_paths: PlannedCollectionPaths
+
+
+@dataclass(frozen=True)
+class CollectionProcessingReport:
+    """
+    Represents the final spreadsheet reporting values for one processed collection.
+    """
+
+    status_update: CollectionProcessingStatusUpdate
+    summary_update: CollectionSummaryUpdate
 
 
 def get_downloaded_storage_root() -> Path:
@@ -318,14 +343,133 @@ def log_collection_download_summary(
     log.info('Collection %s spreadsheet progress updates are not implemented yet.', collection_job.collection_id)
 
 
+def build_collection_summary_update(
+    storage_root: Path,
+    collection_id: int,
+    discovery_completed_at: str,
+    download_results: list[DownloadResult],
+) -> CollectionSummaryUpdate:
+    """
+    Builds final spreadsheet summary-field values for one collection.
+    """
+    collection_root = storage_root / 'collections' / str(collection_id)
+    successful_download_count = sum(1 for result in download_results if result.success)
+    downloaded_summary = 'yes' if successful_download_count > 0 else 'no'
+    result = CollectionSummaryUpdate(
+        summary_status_last_wasapi_check=discovery_completed_at,
+        summary_status_downloaded_warcs_count=str(successful_download_count),
+        summary_status_downloaded=downloaded_summary,
+        summary_status_server_path=str(collection_root),
+    )
+    return result
+
+
+def build_collection_final_report(
+    storage_root: Path,
+    collection_job: CollectionJob,
+    discovery_completed_at: str,
+    planned_downloads: list[PlannedDownload],
+    download_results: list[DownloadResult],
+    fixity_results: list[FixityResult],
+) -> CollectionProcessingReport:
+    """
+    Builds the final collection status and summary payload for spreadsheet reporting.
+    """
+    failure_count = sum(1 for result in download_results if not result.success)
+    failure_count += sum(1 for result in fixity_results if not result.success)
+    successful_download_count = sum(1 for result in download_results if result.success)
+    status_main = STATUS_DOWNLOADED_WITHOUT_ERRORS
+    status_detail = f'{successful_download_count} file downloads completed successfully'
+    if not planned_downloads:
+        status_main = STATUS_NO_NEW_FILES_TO_DOWNLOAD
+        status_detail = f'since {discovery_completed_at}'
+    elif failure_count > 0:
+        status_main = STATUS_COMPLETED_WITH_SOME_FILE_FAILURES
+        status_detail = f'{failure_count} file operations failed'
+    result = CollectionProcessingReport(
+        status_update=CollectionProcessingStatusUpdate(
+            processing_status_main=status_main,
+            processing_status_detail=status_detail,
+        ),
+        summary_update=build_collection_summary_update(
+            storage_root=storage_root,
+            collection_id=collection_job.collection_id,
+            discovery_completed_at=discovery_completed_at,
+            download_results=download_results,
+        ),
+    )
+    return result
+
+
+def build_collection_failure_report(
+    storage_root: Path,
+    collection_job: CollectionJob,
+    status_main: str,
+    status_detail: str,
+    reported_at: str,
+) -> CollectionProcessingReport:
+    """
+    Builds a failure-oriented spreadsheet report for collection-level processing exceptions.
+    """
+    result = CollectionProcessingReport(
+        status_update=CollectionProcessingStatusUpdate(
+            processing_status_main=status_main,
+            processing_status_detail=status_detail,
+        ),
+        summary_update=CollectionSummaryUpdate(
+            summary_status_last_wasapi_check=reported_at,
+            summary_status_downloaded_warcs_count='0',
+            summary_status_downloaded='no',
+            summary_status_server_path=str(storage_root / 'collections' / str(collection_job.collection_id)),
+        ),
+    )
+    return result
+
+
+def write_collection_start_status(
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+    collection_job: CollectionJob,
+    after_datetime: datetime,
+) -> None:
+    """
+    Writes the collection-level start status before discovery begins.
+    """
+    status_update = CollectionProcessingStatusUpdate(
+        processing_status_main=STATUS_DISCOVERY_IN_PROGRESS,
+        processing_status_detail=f'store-time-after {after_datetime.isoformat()}',
+    )
+    update_collection_processing_status(worksheet, header_location, collection_job.row_number, status_update)
+
+
+def write_collection_final_report(
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+    collection_job: CollectionJob,
+    report: CollectionProcessingReport,
+) -> None:
+    """
+    Writes the final collection-level status and summary fields.
+    """
+    update_collection_final_reporting(
+        worksheet,
+        header_location,
+        collection_job.row_number,
+        report.status_update,
+        report.summary_update,
+    )
+
+
 def process_collection_job(
     client: httpx.Client,
     collection_job: CollectionJob,
     storage_root: Path,
     wasapi_base_url: str,
-) -> None:
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+) -> CollectionProcessingReport:
     """
-    Processes one collection through the implemented sequential orchestration stages.
+    Processes one collection through the implemented sequential orchestration stages and returns final reporting values.
     Called by: run_collection_orchestration()
     """
     state = load_collection_state(storage_root, collection_job.collection_id)
@@ -338,6 +482,8 @@ def process_collection_job(
         collection_job.collection_id,
         after_datetime.isoformat(),
     )
+
+    write_collection_start_status(worksheet, header_location, collection_job, after_datetime)
 
     discovery_result = fetch_collection_discovery(
         client=client,
@@ -379,3 +525,13 @@ def process_collection_job(
         download_results,
         fixity_results,
     )
+    result = build_collection_final_report(
+        storage_root=storage_root,
+        collection_job=collection_job,
+        discovery_completed_at=datetime.now(UTC).isoformat(),
+        planned_downloads=planned_downloads,
+        download_results=download_results,
+        fixity_results=fixity_results,
+    )
+    write_collection_final_report(worksheet, header_location, collection_job, result)
+    return result

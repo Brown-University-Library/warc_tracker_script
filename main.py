@@ -1,12 +1,21 @@
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import dotenv
 import httpx
 
-from lib.collection_sheet import fetch_collection_jobs
-from lib.orchestration import get_archive_it_credentials, get_downloaded_storage_root, process_collection_job
+from lib.collection_sheet import CollectionSheetContractError, load_collection_sheet_context
+from lib.orchestration import (
+    STATUS_DISCOVERY_FAILED,
+    STATUS_SPREADSHEET_UPDATE_FAILED,
+    build_collection_failure_report,
+    get_archive_it_credentials,
+    get_downloaded_storage_root,
+    process_collection_job,
+    write_collection_final_report,
+)
 from lib.wasapi_discovery import DEFAULT_WASAPI_BASE_URL, WasapiDiscoveryError
 
 dotenv.load_dotenv()
@@ -46,14 +55,24 @@ def run_collection_orchestration(
     """
     Runs the current sequential collection orchestration flow.
     """
-    collection_jobs = fetch_collection_jobs(spreadsheet_id)
-    log.debug(f'active collections found, ``{collection_jobs}``')
+    sheet_context = load_collection_sheet_context(spreadsheet_id)
+    collection_jobs = sheet_context.collection_jobs
+    worksheet = sheet_context.worksheet
+    header_location = sheet_context.header_location
+    log.debug('active collections found, ``%s``', collection_jobs)
 
     timeout = httpx.Timeout(30.0, connect=30.0)
     with httpx.Client(auth=archive_it_credentials, timeout=timeout, follow_redirects=True) as client:
         for collection_job in collection_jobs:
             try:
-                process_collection_job(client, collection_job, downloaded_storage_root, wasapi_base_url)
+                process_collection_job(
+                    client,
+                    collection_job,
+                    downloaded_storage_root,
+                    wasapi_base_url,
+                    worksheet,
+                    header_location,
+                )
             except WasapiDiscoveryError as exc:
                 partial_result = exc.partial_result
                 partial_record_count = 0 if partial_result is None else len(partial_result.records)
@@ -62,8 +81,36 @@ def run_collection_orchestration(
                     collection_job.collection_id,
                     partial_record_count,
                 )
+                failure_report = build_collection_failure_report(
+                    storage_root=downloaded_storage_root,
+                    collection_job=collection_job,
+                    status_main=STATUS_DISCOVERY_FAILED,
+                    status_detail=f'discovery failed after {partial_record_count} partial records',
+                    reported_at=datetime.now(UTC).isoformat(),
+                )
+                try:
+                    write_collection_final_report(worksheet, header_location, collection_job, failure_report)
+                except Exception:
+                    log.exception(
+                        'Collection %s final spreadsheet reporting failed after discovery failure.',
+                        collection_job.collection_id,
+                    )
             except Exception:
                 log.exception('Collection %s processing failed.', collection_job.collection_id)
+                failure_report = build_collection_failure_report(
+                    storage_root=downloaded_storage_root,
+                    collection_job=collection_job,
+                    status_main=STATUS_SPREADSHEET_UPDATE_FAILED,
+                    status_detail='collection processing or reporting failed',
+                    reported_at=datetime.now(UTC).isoformat(),
+                )
+                try:
+                    write_collection_final_report(worksheet, header_location, collection_job, failure_report)
+                except Exception:
+                    log.exception(
+                        'Collection %s final spreadsheet reporting failed after processing error.',
+                        collection_job.collection_id,
+                    )
 
 
 ## manager function -------------------------------------------------
@@ -88,7 +135,10 @@ def main() -> None:
     wasapi_base_url = os.getenv('ARCHIVEIT_WASAPI_BASE_URL', DEFAULT_WASAPI_BASE_URL)
     log.debug('envars loaded')
 
-    run_collection_orchestration(spreadsheet_id, downloaded_storage_root, wasapi_base_url, archive_it_credentials)
+    try:
+        run_collection_orchestration(spreadsheet_id, downloaded_storage_root, wasapi_base_url, archive_it_credentials)
+    except CollectionSheetContractError:
+        log.exception('Collection worksheet reporting contract validation failed.')
     log.info('processing complete')
     return None
 
