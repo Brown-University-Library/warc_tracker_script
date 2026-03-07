@@ -33,9 +33,9 @@ Completed so far:
 - a production fixity module exists in `lib/fixity.py`; it computes SHA-256 for downloaded WARCs, writes `.sha256` and `.json` sidecars atomically, and returns explicit success/failure results
 - a temporary investigative WASAPI metadata-capture script exists in `tmp_inspect_collection_wasapi.py`
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
-- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, downloads WARC files sequentially to planned destinations, generates fixity sidecars after successful downloads, durably records per-file download/fixity outcomes in `state.json`, and logs per-collection download/fixity summaries
+- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, switches between first-run full historical backfill and checkpointed 30-day overlap-window discovery based on the local enumeration checkpoint, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, downloads WARC files sequentially to planned destinations, generates fixity sidecars after successful downloads, durably records per-file download/fixity outcomes in `state.json`, and logs per-collection download/fixity summaries
 - Archive-It credential loading and storage-root resolution exist in `lib/orchestration.py`
-- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, fixity helpers, production orchestration helpers, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
+- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, fixity helpers, production orchestration helpers including first-run versus checkpointed discovery behavior, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
 
 Not yet implemented in the production backup flow:
 
@@ -580,9 +580,9 @@ Keep this minimal and practical.
 1. [x] Define configuration and required env vars.
 2. [x] Implement spreadsheet ingestion with header detection and canonical field mapping.
 3. [x] Implement per-collection local `state.json`.
-4. [ ] Update WASAPI discovery and orchestration so a collection with no checkpoint performs a full historical backfill, while
+4. [x] Update WASAPI discovery and orchestration so a collection with no checkpoint performs a full historical backfill, while
     checkpointed collections continue to use `store-time` plus a 30-day overlap.
-5. [ ] Integrate the first-run full-backfill behavior into the current sequential production orchestration flow and verify that
+5. [x] Integrate the first-run full-backfill behavior into the current sequential production orchestration flow and verify that
     the checkpoint is written after successful historical enumeration.
 6. [x] Implement local path building using the year/month collection layout.
 7. [x] Implement downloader with temp-file then atomic rename.
