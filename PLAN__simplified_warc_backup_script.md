@@ -255,6 +255,275 @@ The sheet updater should:
 
 ---
 
+## Detailed design for spreadsheet status updates
+
+This section expands the spreadsheet-update step so the project has a clearer target before implementation begins.
+
+### Recommendation: use `status_main` and `status_detail` as separate spreadsheet columns
+
+Recommendation for MVP:
+
+- use a **per-collection** `status_main` spreadsheet column
+- use a separate optional `status_detail` spreadsheet column
+- do **not** use one workbook-level or whole-run status field as the primary reporting mechanism
+- do **not** pack both values into one JSON string for MVP
+- optionally add a lightweight whole-run log message or run summary later, but keep the sheet status centered on each collection row
+
+Why this is the better fit:
+
+- the script already processes work in terms of collections
+- the spreadsheet’s control/reporting model is collection-centric
+- collections can succeed, fail, or have no-op outcomes independently
+- a single workbook-level status would become ambiguous as soon as more than one collection is processed in a run
+- the future Trio design still maps naturally to collection-level status updates
+
+### Why not a single all-processing status only
+
+A single status for the entire run would be simpler to write, but it would not answer the operational questions that seem most useful in the sheet:
+
+- which collection is currently being processed
+- which collection had nothing new to download
+- which collection failed during discovery versus downloading versus final sheet update
+- which collection completed successfully but with partial download failures
+
+So the recommendation is:
+
+- **primary status model**: per-collection `status_main` plus optional `status_detail`
+- **optional future enhancement**: separate run-level status or run-log artifact outside the collection worksheet
+
+### Recommendation: define a bounded set of `status_main` values in code
+
+The code should define a small, explicit list of allowed `status_main` values in one place.
+
+Recommendation for MVP:
+
+- define these as constants or an enum-like structure in code
+- keep the list short and stable
+- ensure every sheet write uses one of these values
+- avoid ad hoc free-text `status_main` values generated inline during orchestration
+
+Proposed `status_main` values:
+
+- `pending`
+  - collection was selected for this run but processing has not started yet
+- `discovery-in-progress`
+  - WASAPI enumeration is currently running for the collection
+- `download-planning-complete`
+  - discovery succeeded and the script has determined what files, if any, need download
+- `downloading-in-progress`
+  - one or more files are currently being downloaded or processed for fixity
+- `no-new-files-to-download`
+  - discovery succeeded and no downloads were needed
+- `downloaded-without-errors`
+  - all required downloads and fixity work completed successfully
+- `completed-with-some-file-failures`
+  - collection processing finished, but one or more file downloads or fixity operations failed
+- `discovery-failed`
+  - WASAPI discovery did not complete successfully
+- `spreadsheet-update-failed`
+  - collection processing may have completed, but at least one required sheet write failed
+- `skipped-invalid-collection-row`
+  - the row could not be processed because required collection-level source data was invalid
+
+This list is intentionally more granular than just start/end, but still small enough to stay understandable.
+
+### Recommendation: keep `status_main` and `status_detail` separate
+
+Some statuses naturally invite extra context. Recommendation for MVP:
+
+- keep `status_main` short, stable, and enumerated
+- store extra context separately in `status_detail`
+- if `status_detail` does not exist, treat it as optional and do not block processing
+
+This preserves simplicity while allowing helpful operator-facing context.
+
+### Simple options for status detail / sub-status handling
+
+There are three reasonable options.
+
+#### Option A: `status_main` only
+
+Use one status field and no separate detail field.
+
+Pros:
+
+- simplest implementation
+- lowest sheet complexity
+- easiest to validate
+
+Cons:
+
+- loses useful context such as current filename or failure summary
+- tends to push operators toward logs for basic troubleshooting
+
+Recommendation:
+
+- acceptable only if the worksheet truly has no useful place for detail text
+- not preferred if a detail field can exist
+
+#### Option B: `status_main` plus `status_detail`
+
+Use:
+
+- one enumerated `status_main` field
+- one optional `status_detail` field with compact human-readable context
+
+Example detail values:
+
+- for `downloading-in-progress`: current filename, completed count, total count
+- for `no-new-files-to-download`: overlap-window reference such as `since 2026-02-06T00:00:00Z`
+- for `completed-with-some-file-failures`: `2 of 14 files failed`
+- for `discovery-failed`: short error summary
+
+Pros:
+
+- still simple
+- operator-friendly
+- avoids encoding structured data into `status_main`
+
+Cons:
+
+- detail text may drift in format over time if not kept disciplined
+
+Recommendation:
+
+- **preferred MVP option**
+
+#### Option C: `status_main` plus structured detail fields
+
+Use one `status_main` field plus multiple optional supporting fields such as:
+
+- current filename
+- files completed
+- files total
+- bytes downloaded
+- checkpoint reference date
+- last error summary
+
+Pros:
+
+- best for filtering and future dashboards
+- avoids overloading a single detail field
+
+Cons:
+
+- more worksheet coupling
+- more validation and write logic
+- larger change surface for the current project stage
+
+Recommendation:
+
+- better as a later refinement, not the MVP default
+
+### Recommendation on validation before processing
+
+The user preference for cron jobs to validate early is a strong fit for this project.
+
+Recommendation for the spreadsheet-update layer:
+
+1. validate required configuration and credentials at startup
+2. validate spreadsheet connectivity before collection processing begins
+3. validate required source worksheet headers before selecting active collections
+4. validate expected status-reporting fields before significant download work begins
+5. fail early when a required field for the chosen MVP design is missing
+
+However, there is one important scope distinction:
+
+- **required input fields** should fail early
+- **optional reporting/detail fields** can degrade gracefully
+
+Recommended MVP split:
+
+- required input fields:
+  - fields needed to identify active collections and collection IDs
+- required reporting fields:
+  - one collection-level `status_main` field, if the status-update feature is enabled for the run
+- optional reporting fields:
+  - `status_detail`
+  - server file path field
+  - last WASAPI fetch field
+  - file count field
+  - total size field
+
+### Required TODO if validation is not yet implemented in code
+
+If the production code does not already validate that the required spreadsheet/worksheet status fields exist before significant processing begins, add an explicit project TODO during implementation.
+
+That TODO should state, in substance:
+
+- validate required status-reporting worksheet fields up front before discovery/download processing starts
+- fail early with a clear error when a required field is missing
+- distinguish missing required fields from missing optional reporting fields
+
+This TODO should remain until the validation behavior exists in production code.
+
+### Recommended collection-level status lifecycle
+
+For better granularity than only start/end, the collection-level lifecycle should look like this:
+
+1. `pending`
+2. `discovery-in-progress`
+3. `download-planning-complete`
+4. one of:
+   - `no-new-files-to-download`
+   - `downloading-in-progress`
+5. final outcome:
+   - `downloaded-without-errors`
+   - `completed-with-some-file-failures`
+   - `discovery-failed`
+   - `spreadsheet-update-failed`
+
+This gives useful operational checkpoints without turning the sheet into a per-file event log.
+
+### Recommendation on write frequency
+
+Recommendation for MVP:
+
+- always write status when a collection enters discovery
+- write status after download planning determines whether work exists
+- write periodic download progress only at coarse checkpoints, not per byte and not necessarily per file
+- always write a final outcome summary
+
+Good coarse progress examples:
+
+- when downloading starts
+- every N completed files
+- when the current filename changes, if detail-field writes are cheap enough
+- on final completion or failure
+
+Avoid overly chatty writes that make rate-limiting and retry behavior harder to reason about.
+
+### Recommendation on summary fields versus status fields
+
+Keep summary metrics separate from status.
+
+- `status_main` answers: what phase or outcome is this collection in
+- `status_detail` answers: what extra context is useful right now
+- summary fields answer: what was the result of this collection run
+
+For example:
+
+- `status_main`: `downloading-in-progress`
+- `status_detail`: `example-20260301-00001.warc.gz (3/12)`
+- summary fields at finish:
+  - last WASAPI fetch timestamp
+  - total file count discovered or downloaded, depending on field semantics chosen during implementation
+  - total bytes downloaded
+  - server file path
+
+### Design guardrails
+
+To preserve simplicity:
+
+- keep the filesystem and `state.json` as the source of truth
+- never require the spreadsheet to reconstruct per-file correctness
+- keep the `status_main` vocabulary explicit and bounded
+- prefer one optional detail field over several structured progress columns for MVP
+- validate required fields early, before expensive processing
+- do not let missing optional reporting fields block downloads
+
+---
+
 ## Local state model
 
 Use a filesystem-based state directory only.
