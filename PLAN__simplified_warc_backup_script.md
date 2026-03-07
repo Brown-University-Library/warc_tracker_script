@@ -259,12 +259,12 @@ The sheet updater should:
 
 This section expands the spreadsheet-update step so the project has a clearer target before implementation begins.
 
-### Recommendation: use `status_main` and `status_detail` as separate spreadsheet columns
+### Recommendation: use `processing_status_main` and `processing_status_detail` as separate spreadsheet columns
 
 Recommendation for MVP:
 
-- use a **per-collection** `status_main` spreadsheet column
-- use a separate optional `status_detail` spreadsheet column
+- use a **per-collection** `processing_status_main` spreadsheet column
+- use a separate `processing_status_detail` spreadsheet column
 - do **not** use one workbook-level or whole-run status field as the primary reporting mechanism
 - do **not** pack both values into one JSON string for MVP
 - optionally add a lightweight whole-run log message or run summary later, but keep the sheet status centered on each collection row
@@ -288,21 +288,21 @@ A single status for the entire run would be simpler to write, but it would not a
 
 So the recommendation is:
 
-- **primary status model**: per-collection `status_main` plus optional `status_detail`
+- **primary status model**: per-collection `processing_status_main` plus `processing_status_detail`
 - **optional future enhancement**: separate run-level status or run-log artifact outside the collection worksheet
 
-### Recommendation: define a bounded set of `status_main` values in code
+### Recommendation: define a bounded set of `processing_status_main` values in code
 
-The code should define a small, explicit list of allowed `status_main` values in one place.
+The code should define a small, explicit list of allowed `processing_status_main` values in one place.
 
 Recommendation for MVP:
 
 - define these as constants or an enum-like structure in code
 - keep the list short and stable
 - ensure every sheet write uses one of these values
-- avoid ad hoc free-text `status_main` values generated inline during orchestration
+- avoid ad hoc free-text `processing_status_main` values generated inline during orchestration
 
-Proposed `status_main` values:
+Proposed `processing_status_main` values:
 
 - `pending`
   - collection was selected for this run but processing has not started yet
@@ -327,50 +327,26 @@ Proposed `status_main` values:
 
 This list is intentionally more granular than just start/end, but still small enough to stay understandable.
 
-### Recommendation: keep `status_main` and `status_detail` separate
+### Recommendation: keep `processing_status_main` and `processing_status_detail` separate
 
 Some statuses naturally invite extra context. Recommendation for MVP:
 
-- keep `status_main` short, stable, and enumerated
-- store extra context separately in `status_detail`
-- if `status_detail` does not exist, treat it as optional and do not block processing
+- keep `processing_status_main` short, stable, and enumerated
+- store extra context separately in `processing_status_detail`
+- require both `processing_status_main` and `processing_status_detail` worksheet columns to exist before significant processing begins
 
 This preserves simplicity while allowing helpful operator-facing context.
 
-### Simple options for status detail / sub-status handling
-
-There are three reasonable options.
-
-#### Option A: `status_main` only
-
-Use one status field and no separate detail field.
-
-Pros:
-
-- simplest implementation
-- lowest sheet complexity
-- easiest to validate
-
-Cons:
-
-- loses useful context such as current filename or failure summary
-- tends to push operators toward logs for basic troubleshooting
-
-Recommendation:
-
-- acceptable only if the worksheet truly has no useful place for detail text
-- not preferred if a detail field can exist
-
-#### Option B: `status_main` plus `status_detail`
+### Chosen status-field approach
 
 Use:
 
-- one enumerated `status_main` field
-- one optional `status_detail` field with compact human-readable context
+- one enumerated `processing_status_main` field
+- one required `processing_status_detail` field with compact human-readable context
 
 Example detail values:
 
-- for `downloading-in-progress`: current filename, completed count, total count
+- for `downloading-in-progress`: coarse progress marker plus compact progress counts, such as `20% (3/15 files)` or `60% (9/15 files)`
 - for `no-new-files-to-download`: overlap-window reference such as `since 2026-02-06T00:00:00Z`
 - for `completed-with-some-file-failures`: `2 of 14 files failed`
 - for `discovery-failed`: short error summary
@@ -379,41 +355,17 @@ Pros:
 
 - still simple
 - operator-friendly
-- avoids encoding structured data into `status_main`
+- avoids encoding structured data into `processing_status_main`
 
 Cons:
 
 - detail text may drift in format over time if not kept disciplined
 
-Recommendation:
+Implementation note:
 
-- **preferred MVP option** -- USER-UPDATE: we'll use this Option.
-
-#### Option C: `status_main` plus structured detail fields
-
-Use one `status_main` field plus multiple optional supporting fields such as:
-
-- current filename
-- files completed
-- files total
-- bytes downloaded
-- checkpoint reference date
-- last error summary
-
-Pros:
-
-- best for filtering and future dashboards
-- avoids overloading a single detail field
-
-Cons:
-
-- more worksheet coupling
-- more validation and write logic
-- larger change surface for the current project stage
-
-Recommendation:
-
-- better as a later refinement, not the MVP default
+- use coarse, stable `processing_status_detail` formats rather than highly dynamic per-file chatter
+- prefer milestone-style updates during downloading, such as `20%`, `40%`, `60%`, `80%`, and completion
+- include file counts with the milestone when available
 
 ### Recommendation on validation before processing
 
@@ -424,26 +376,22 @@ Recommendation for the spreadsheet-update layer:
 1. validate required configuration and credentials at startup
 2. validate spreadsheet connectivity before collection processing begins
 3. validate required source worksheet headers before selecting active collections
-4. validate expected status-reporting fields before significant download work begins -- USER-UPDATE: if by this you mean "validate all existing content-entries", then I'd say "no", because this give us flexibility to change the code to write more useful `status_main` entries later. If, though, you mean "validate that the fields we need to write to exist", then I'd say "yes".
+4. validate that the required status-reporting worksheet columns exist before significant download work begins
 5. fail early when a required field for the chosen MVP design is missing
 
-However, there is one important scope distinction:
-
-- **required input fields** should fail early
-- **optional reporting/detail fields** can degrade gracefully -- USER-UPDATE: I don't know what you mean by this. I like expecting the `status_main` column, _AND_ the `status_detail` column to definitely exist. Clarify or remove this.
+This validation means validating the presence of the columns the code expects to write to. It does **not** mean validating every existing historical cell value in those columns before the run starts.
 
 Recommended MVP split:
 
 - required input fields:
   - fields needed to identify active collections and collection IDs
 - required reporting fields:
-  - one collection-level `status_main` field, if the status-update feature is enabled for the run
-- optional reporting fields:
-  - `status_detail`
-  - server file path field
-  - last WASAPI fetch field
-  - file count field
-  - total size field
+  - collection-level `processing_status_main`
+  - collection-level `processing_status_detail`
+  - `summary_status_last_wasapi_check`
+  - `summary_status_downloaded_warcs_count`
+  - `summary_status_downloaded`
+  - `summary_status_server_path`
 
 ### Required TODO if validation is not yet implemented in code
 
@@ -453,7 +401,7 @@ That TODO should state, in substance:
 
 - validate required status-reporting worksheet fields up front before discovery/download processing starts
 - fail early with a clear error when a required field is missing
-- distinguish missing required fields from missing optional reporting fields
+- require `processing_status_main`, `processing_status_detail`, `summary_status_last_wasapi_check`, `summary_status_downloaded_warcs_count`, `summary_status_downloaded`, and `summary_status_server_path` to exist before processing begins
 
 This TODO should remain until the validation behavior exists in production code.
 
@@ -475,7 +423,13 @@ For better granularity than only start/end, the collection-level lifecycle shoul
 
 This gives useful operational checkpoints without turning the sheet into a per-file event log.
 
-USER-UPDATE: `downloading-in-progress`, while a good `status_main` value, is not enough on its own. If you don't want super-granularity in the `status_detail` field, i'd like a 20-40-60-80 percentage-of-files-downloaded -- or something similar.
+During `downloading-in-progress`, `processing_status_detail` should provide coarse progress visibility rather than only repeating the phase name.
+
+Recommended MVP convention:
+
+- update `processing_status_detail` at coarse milestones such as `20%`, `40%`, `60%`, `80%`, and completion
+- include completed/total file counts when known, for example `40% (6/15 files)`
+- avoid highly chatty per-file `processing_status_detail` updates unless later experience shows they are needed
 
 ### Recommendation on write frequency
 
@@ -483,14 +437,14 @@ Recommendation for MVP:
 
 - always write status when a collection enters discovery
 - write status after download planning determines whether work exists
-- write periodic download progress only at coarse checkpoints, not per byte and not necessarily per file
+- write periodic download progress only at coarse checkpoints, using milestone-style `processing_status_detail` updates
 - always write a final outcome summary
 
 Good coarse progress examples:
 
 - when downloading starts
-- every N completed files
-- when the current filename changes, if detail-field writes are cheap enough
+- at `20%`, `40%`, `60%`, and `80%` of files completed
+- when a useful milestone can be expressed as `X/Y files`
 - on final completion or failure
 
 Avoid overly chatty writes that make rate-limiting and retry behavior harder to reason about.
@@ -499,19 +453,21 @@ Avoid overly chatty writes that make rate-limiting and retry behavior harder to 
 
 Keep summary metrics separate from status.
 
-- `status_main` answers: what phase or outcome is this collection in
-- `status_detail` answers: what extra context is useful right now
-- summary fields answer: what was the result of this collection run
+- `processing_status_main` answers: what phase or outcome is this collection in
+- `processing_status_detail` answers: what extra context is useful right now
+- `summary_status_*` fields answer: what was the result of this collection run
 
 For example:
 
-- `status_main`: `downloading-in-progress`
-- `status_detail`: `example-20260301-00001.warc.gz (3/12)`
+- `processing_status_main`: `downloading-in-progress`
+- `processing_status_detail`: `40% (6/15 files)`
 - summary fields at finish:
-  - last WASAPI fetch timestamp
-  - total file count discovered or downloaded, depending on field semantics chosen during implementation
-  - total bytes downloaded
-  - server file path
+  - `summary_status_last_wasapi_check`
+  - `summary_status_downloaded_warcs_count`
+  - `summary_status_downloaded`
+  - `summary_status_server_path`
+
+For this plan, all six spreadsheet columns named above are part of the required worksheet contract for the spreadsheet-update feature. If any of them are absent, the script should fail early before significant processing begins.
 
 ### Design guardrails
 
@@ -519,10 +475,10 @@ To preserve simplicity:
 
 - keep the filesystem and `state.json` as the source of truth
 - never require the spreadsheet to reconstruct per-file correctness
-- keep the `status_main` vocabulary explicit and bounded
-- prefer one optional detail field over several structured progress columns for MVP
+- keep the `processing_status_main` vocabulary explicit and bounded
+- prefer one required `processing_status_detail` field over several structured progress columns for MVP
 - validate required fields early, before expensive processing
-- do not let missing optional reporting fields block downloads
+- require the processing-status and summary-status columns up front as part of startup validation
 
 ---
 
