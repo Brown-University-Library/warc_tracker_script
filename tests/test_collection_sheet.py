@@ -98,7 +98,7 @@ class TestCollectionReportingContract(TestCase):
                 'processing_status_main': 2,
                 'summary_status_last_wasapi_check': 3,
                 'summary_status_downloaded_warcs_count': 4,
-                'summary_status_downloaded': 5,
+                'summary_status_downloaded_warcs_size': 5,
                 'summary_status_server_path': 6,
             },
         )
@@ -147,7 +147,7 @@ class TestCollectionReportingContract(TestCase):
                 'processing_status_detail': 1,
                 'summary_status_last_wasapi_check': 2,
                 'summary_status_downloaded_warcs_count': 3,
-                'summary_status_downloaded': 4,
+                'summary_status_downloaded_warcs_size': 4,
                 'summary_status_server_path': 5,
             },
         )
@@ -158,7 +158,7 @@ class TestCollectionReportingContract(TestCase):
         summary_update = CollectionSummaryUpdate(
             summary_status_last_wasapi_check='2026-03-07T15:00:00+00:00',
             summary_status_downloaded_warcs_count='1',
-            summary_status_downloaded='yes',
+            summary_status_downloaded_warcs_size='11',
             summary_status_server_path='/tmp/storage/collections/123',
         )
 
@@ -171,7 +171,7 @@ class TestCollectionReportingContract(TestCase):
                 {'range': 'B9', 'values': [['1 file downloads completed successfully']]},
                 {'range': 'C9', 'values': [['2026-03-07T15:00:00+00:00']]},
                 {'range': 'D9', 'values': [['1']]},
-                {'range': 'E9', 'values': [['yes']]},
+                {'range': 'E9', 'values': [['11']]},
                 {'range': 'F9', 'values': [['/tmp/storage/collections/123']]},
             ],
         )

@@ -18,7 +18,7 @@ REQUIRED_REPORTING_FIELDS = (
     'processing_status_detail',
     'summary_status_last_wasapi_check',
     'summary_status_downloaded_warcs_count',
-    'summary_status_downloaded',
+    'summary_status_downloaded_warcs_size',
     'summary_status_server_path',
 )
 
@@ -32,7 +32,7 @@ HEADER_ALIASES: dict[str, set[str]] = {
     'processing_status_detail': {'processing_status_detail'},
     'summary_status_last_wasapi_check': {'summary_status_last_wasapi_check'},
     'summary_status_downloaded_warcs_count': {'summary_status_downloaded_warcs_count'},
-    'summary_status_downloaded': {'summary_status_downloaded'},
+    'summary_status_downloaded_warcs_size': {'summary_status_downloaded_warcs_size'},
     'summary_status_server_path': {'summary_status_server_path'},
 }
 
@@ -95,7 +95,7 @@ class CollectionSummaryUpdate:
 
     summary_status_last_wasapi_check: str
     summary_status_downloaded_warcs_count: str
-    summary_status_downloaded: str
+    summary_status_downloaded_warcs_size: str
     summary_status_server_path: str
 
 
@@ -315,7 +315,7 @@ def build_collection_summary_cell_updates(
     summary_values = {
         'summary_status_last_wasapi_check': summary_update.summary_status_last_wasapi_check,
         'summary_status_downloaded_warcs_count': summary_update.summary_status_downloaded_warcs_count,
-        'summary_status_downloaded': summary_update.summary_status_downloaded,
+        'summary_status_downloaded_warcs_size': summary_update.summary_status_downloaded_warcs_size,
         'summary_status_server_path': summary_update.summary_status_server_path,
     }
     result: list[dict[str, str]] = []

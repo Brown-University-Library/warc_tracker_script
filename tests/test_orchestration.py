@@ -206,7 +206,7 @@ class TestProcessCollectionJob(TestCase):
                 'processing_status_detail': 1,
                 'summary_status_last_wasapi_check': 2,
                 'summary_status_downloaded_warcs_count': 3,
-                'summary_status_downloaded': 4,
+                'summary_status_downloaded_warcs_size': 4,
                 'summary_status_server_path': 5,
             },
         )
@@ -277,6 +277,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_final_reporting.call_args.args[2], 7)
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '1')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '11')
 
     def test_skips_checkpoint_save_when_discovery_not_complete(self):
         """
@@ -298,7 +299,7 @@ class TestProcessCollectionJob(TestCase):
                 'processing_status_detail': 1,
                 'summary_status_last_wasapi_check': 2,
                 'summary_status_downloaded_warcs_count': 3,
-                'summary_status_downloaded': 4,
+                'summary_status_downloaded_warcs_size': 4,
                 'summary_status_server_path': 5,
             },
         )
@@ -387,7 +388,7 @@ class TestProcessCollectionJob(TestCase):
                 'processing_status_detail': 1,
                 'summary_status_last_wasapi_check': 2,
                 'summary_status_downloaded_warcs_count': 3,
-                'summary_status_downloaded': 4,
+                'summary_status_downloaded_warcs_size': 4,
                 'summary_status_server_path': 5,
             },
         )
@@ -464,7 +465,7 @@ class TestCollectionReportingHelpers(TestCase):
         )
 
         self.assertEqual(result.status_update.processing_status_main, STATUS_COMPLETED_WITH_SOME_FILE_FAILURES)
-        self.assertEqual(result.summary_update.summary_status_downloaded, 'no')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0')
 
     def test_build_collection_failure_report_for_discovery_failure(self):
         """

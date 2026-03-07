@@ -354,11 +354,11 @@ def build_collection_summary_update(
     """
     collection_root = storage_root / 'collections' / str(collection_id)
     successful_download_count = sum(1 for result in download_results if result.success)
-    downloaded_summary = 'yes' if successful_download_count > 0 else 'no'
+    successful_download_size = sum(result.bytes_written for result in download_results if result.success)
     result = CollectionSummaryUpdate(
         summary_status_last_wasapi_check=discovery_completed_at,
         summary_status_downloaded_warcs_count=str(successful_download_count),
-        summary_status_downloaded=downloaded_summary,
+        summary_status_downloaded_warcs_size=str(successful_download_size),
         summary_status_server_path=str(collection_root),
     )
     return result
@@ -419,7 +419,7 @@ def build_collection_failure_report(
         summary_update=CollectionSummaryUpdate(
             summary_status_last_wasapi_check=reported_at,
             summary_status_downloaded_warcs_count='0',
-            summary_status_downloaded='no',
+            summary_status_downloaded_warcs_size='0',
             summary_status_server_path=str(storage_root / 'collections' / str(collection_job.collection_id)),
         ),
     )

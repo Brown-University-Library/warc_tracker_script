@@ -145,7 +145,7 @@ class TestOrchestrationDownloadConsumption(TestCase):
                 'processing_status_detail': 1,
                 'summary_status_last_wasapi_check': 2,
                 'summary_status_downloaded_warcs_count': 3,
-                'summary_status_downloaded': 4,
+                'summary_status_downloaded_warcs_size': 4,
                 'summary_status_server_path': 5,
             },
         )

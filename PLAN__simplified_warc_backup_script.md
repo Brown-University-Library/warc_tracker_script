@@ -391,7 +391,7 @@ Recommended MVP split:
   - collection-level `processing_status_detail`
   - `summary_status_last_wasapi_check`
   - `summary_status_downloaded_warcs_count`
-  - `summary_status_downloaded`
+  - `summary_status_downloaded_warcs_size`
   - `summary_status_server_path`
 
 ### Required TODO if validation is not yet implemented in code
@@ -402,7 +402,7 @@ That TODO should state, in substance:
 
 - validate required status-reporting worksheet fields up front before discovery/download processing starts
 - fail early with a clear error when a required field is missing
-- require `processing_status_main`, `processing_status_detail`, `summary_status_last_wasapi_check`, `summary_status_downloaded_warcs_count`, `summary_status_downloaded`, and `summary_status_server_path` to exist before processing begins
+- require `processing_status_main`, `processing_status_detail`, `summary_status_last_wasapi_check`, `summary_status_downloaded_warcs_count`, `summary_status_downloaded_warcs_size`, and `summary_status_server_path` to exist before processing begins
 
 This TODO should remain until the validation behavior exists in production code.
 
@@ -465,7 +465,7 @@ For example:
 - summary fields at finish:
   - `summary_status_last_wasapi_check`
   - `summary_status_downloaded_warcs_count`
-  - `summary_status_downloaded`
+  - `summary_status_downloaded_warcs_size`
   - `summary_status_server_path`
 
 For this plan, all six spreadsheet columns named above are part of the required worksheet contract for the spreadsheet-update feature. If any of them are absent, the script should fail early before significant processing begins.

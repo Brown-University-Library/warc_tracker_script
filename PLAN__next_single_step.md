@@ -52,7 +52,7 @@ Extend the current sequential production flow so that it validates the presence 
 - `processing_status_detail`
 - `summary_status_last_wasapi_check`
 - `summary_status_downloaded_warcs_count`
-- `summary_status_downloaded`
+- `summary_status_downloaded_warcs_size`
 - `summary_status_server_path`
 
 Then, for each processed collection row:
