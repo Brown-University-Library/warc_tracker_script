@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -6,6 +7,14 @@ REQUIRED_TOP_LEVEL_DEFAULTS: dict[str, object] = {
     'enumeration_checkpoint_store_time_max': None,
     'files': {},
 }
+
+
+def build_attempt_timestamp() -> str:
+    """
+    Builds the current UTC timestamp for manifest attempt tracking.
+    """
+    result = datetime.now(timezone.utc).isoformat()
+    return result
 
 
 class LocalStateError(RuntimeError):
@@ -57,6 +66,84 @@ def normalize_collection_state(state: dict[str, object]) -> dict[str, object]:
     files_value = result.get('files')
     if not isinstance(files_value, dict):
         raise LocalStateError('Collection state field `files` must be a JSON object.')
+    return result
+
+
+def get_file_manifest_entry(state: dict[str, object], filename: str) -> dict[str, object]:
+    """
+    Returns the mutable manifest entry for one filename, creating it when absent.
+    """
+    normalized_state = normalize_collection_state(state)
+    files_value = normalized_state['files']
+    if not isinstance(files_value, dict):
+        raise LocalStateError('Collection state field `files` must be a JSON object.')
+
+    entry_value = files_value.get(filename)
+    if not isinstance(entry_value, dict):
+        entry_value = {}
+        files_value[filename] = entry_value
+
+    result = entry_value
+    return result
+
+
+def update_file_manifest_for_download_result(
+    state: dict[str, object],
+    filename: str,
+    source_url: str,
+    warc_path: Path,
+    success: bool,
+    error_message: str | None,
+) -> dict[str, object]:
+    """
+    Updates one file manifest entry with the durable download outcome.
+    """
+    entry = get_file_manifest_entry(state, filename)
+    current_error_count = entry.get('error_count', 0)
+    error_count = current_error_count if isinstance(current_error_count, int) else 0
+    entry['source_url'] = source_url
+    entry['warc_path'] = str(warc_path)
+    entry['last_attempt_at'] = build_attempt_timestamp()
+    entry['download_status'] = 'downloaded' if success else 'failed'
+    if success:
+        entry['status'] = 'downloaded'
+        entry['error_summary'] = None
+    else:
+        entry['status'] = 'failed'
+        entry['error_count'] = error_count + 1
+        entry['error_summary'] = error_message
+    result = entry
+    return result
+
+
+def update_file_manifest_for_fixity_result(
+    state: dict[str, object],
+    filename: str,
+    sha256_path: Path,
+    json_path: Path,
+    success: bool,
+    completed_at: str | None,
+    error_message: str | None,
+) -> dict[str, object]:
+    """
+    Updates one file manifest entry with the durable fixity outcome.
+    """
+    entry = get_file_manifest_entry(state, filename)
+    current_error_count = entry.get('error_count', 0)
+    error_count = current_error_count if isinstance(current_error_count, int) else 0
+    entry['sha256_path'] = str(sha256_path)
+    entry['json_path'] = str(json_path)
+    entry['fixity_status'] = 'created' if success else 'failed'
+    if completed_at is not None:
+        entry['fixity_completed_at'] = completed_at
+    if success:
+        entry['status'] = 'downloaded'
+        entry['error_summary'] = None
+    else:
+        entry['status'] = 'fixity_failed'
+        entry['error_count'] = error_count + 1
+        entry['error_summary'] = error_message
+    result = entry
     return result
 
 

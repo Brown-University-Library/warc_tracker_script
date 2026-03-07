@@ -302,7 +302,9 @@ class TestProcessCollectionJob(TestCase):
             mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
             process_collection_job(client, collection_job, Path('/tmp/storage'), 'https://example.org/wasapi')
 
-        self.assertFalse(mock_save.called)
+        saved_states = [call.args[2] for call in mock_save.call_args_list]
+        self.assertGreaterEqual(len(saved_states), 2)
+        self.assertEqual(saved_states[0]['enumeration_checkpoint_store_time_max'], None)
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_download.call_count, 1)

@@ -9,7 +9,12 @@ import httpx
 from lib.collection_sheet import CollectionJob
 from lib.downloader import DownloadResult, download_to_path
 from lib.fixity import FixityResult, write_fixity_sidecars
-from lib.local_state import load_collection_state, save_collection_state
+from lib.local_state import (
+    load_collection_state,
+    save_collection_state,
+    update_file_manifest_for_download_result,
+    update_file_manifest_for_fixity_result,
+)
 from lib.storage_layout import PlannedCollectionPaths, StorageLayoutError, plan_collection_paths
 from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collection_discovery
 
@@ -182,9 +187,25 @@ def log_planned_download_paths(collection_id: int, planned_paths: list[PlannedCo
         )
 
 
+def save_collection_state_after_file_processing(
+    storage_root: Path,
+    collection_id: int,
+    state: dict[str, object],
+    filename: str,
+) -> None:
+    """
+    Saves collection state after one file outcome has been recorded durably.
+    Called by: run_planned_downloads()
+    """
+    save_collection_state(storage_root, collection_id, state)
+    log.info('Saved collection %s state after processing %s.', collection_id, filename)
+
+
 def run_planned_downloads(
     client: httpx.Client,
+    storage_root: Path,
     collection_id: int,
+    state: dict[str, object],
     planned_downloads: list[PlannedDownload],
 ) -> tuple[list[DownloadResult], list[FixityResult]]:
     """
@@ -206,6 +227,15 @@ def run_planned_downloads(
 
         download_result = download_to_path(client, planned_download.source_url, destination_path)
         results.append(download_result)
+        update_file_manifest_for_download_result(
+            state=state,
+            filename=planned_download.filename,
+            source_url=planned_download.source_url,
+            warc_path=destination_path,
+            success=download_result.success,
+            error_message=download_result.error_message,
+        )
+        save_collection_state_after_file_processing(storage_root, collection_id, state, planned_download.filename)
         if download_result.success:
             log.info(
                 'Collection %s downloaded %s bytes for %s to %s',
@@ -221,6 +251,16 @@ def run_planned_downloads(
                 source_url=planned_download.source_url,
             )
             fixity_results.append(fixity_result)
+            update_file_manifest_for_fixity_result(
+                state=state,
+                filename=planned_download.filename,
+                sha256_path=planned_download.planned_paths.sha256_path,
+                json_path=planned_download.planned_paths.json_path,
+                success=fixity_result.success,
+                completed_at=fixity_result.completed_at,
+                error_message=fixity_result.error_message,
+            )
+            save_collection_state_after_file_processing(storage_root, collection_id, state, planned_download.filename)
             if fixity_result.success:
                 log.info(
                     'Collection %s wrote fixity sidecars for %s: sha256=%s json=%s',
@@ -325,7 +365,13 @@ def process_collection_job(
     planned_paths = build_planned_download_paths(storage_root, collection_job.collection_id, discovery_result.records)
     log_planned_download_paths(collection_job.collection_id, planned_paths)
     planned_downloads = build_planned_downloads(storage_root, collection_job.collection_id, discovery_result.records)
-    download_results, fixity_results = run_planned_downloads(client, collection_job.collection_id, planned_downloads)
+    download_results, fixity_results = run_planned_downloads(
+        client,
+        storage_root,
+        collection_job.collection_id,
+        state,
+        planned_downloads,
+    )
     log_collection_download_summary(
         collection_job,
         pending_download_count,
