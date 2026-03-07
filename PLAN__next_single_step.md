@@ -1,244 +1,178 @@
-# Next Single Step: Initial-Download Decision and Verification Slice
+# Next Single Step: Simple Option-1 First-Run Backfill Mode
 
 ## Context for Future Agents
 
 **Code-directives**: review `warc_tracker_script/AGENTS.md` before editing code.
 
-**Master plan reference**: `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
+**Plan references**:
 
-**User preference followed here**: build functionality sequentially from `warc_tracker_script/main.py` when possible, while keeping `main.py` thin and orchestration-focused.
+- `warc_tracker_script/PLAN__handling_historical_warcs.md`
+- `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
 
-**Current implementation status relevant to this step**:
+**Focus of this step**: implement only **Option 1** from `PLAN__handling_historical_warcs.md`.
 
-- the sequential production flow in `main.py` and `lib/orchestration.py` already loads active collection jobs, runs WASAPI discovery, builds local paths, downloads missing files, writes fixity sidecars, updates `state.json`, and logs per-collection summaries
-- the master plan’s first-run rule is already reflected in the codepath through `compute_store_time_after_datetime()` plus sequential orchestration
-- what is still under-specified in production code is the plan rule for **determining what actually needs download** on an initial run and on later runs when a local file or sidecar already exists
+The intended behavior is simple:
+
+- if a collection has no local checkpoint yet, run in **download-everything / full historical backfill** mode
+- if a collection already has a checkpoint, run in normal **30-day overlap-window incremental** mode
+
+This should be implemented with the smallest clear change in the existing sequential flow.
 
 ---
-
 ## Goal of This Step
 
-Implement the production decision layer that answers this question for each discovered WARC record:
+Add one simple mode switch to the current orchestration:
 
-**Should this record be downloaded now, skipped as already complete, or treated as needing local verification / repair work first?**
+1. read the collection's local `state.json`
+2. check whether `enumeration_checkpoint_store_time_max` exists
+3. if no checkpoint exists, do a full historical WASAPI enumeration for that collection
+4. if a checkpoint exists, keep the current 30-day overlap-window behavior
+5. after successful enumeration, save the max observed `store-time` as the checkpoint
 
-This step should make the current sequential pipeline correctly handle initial-download conditions described in the main plan:
-
-- download when the local WARC does not exist
-- re-process when the local WARC exists but expected sidecars are missing or invalid
-- allow retry when the manifest records a prior failed attempt
-- avoid re-downloading a file that is already complete and locally trustworthy
-
-This is the most useful next step because it turns the current “download if destination file is absent” behavior into the fuller MVP rule set that the master plan already calls for.
+That is the whole feature for this step.
 
 ---
-
 ## Why This Is the Right Next Step
 
-1. **It closes a real gap between the plan and the code**
-   - the plan says download need is based on file existence, size/fixity validity, and retry eligibility
-   - the current sequential flow mostly skips when the destination WARC path already exists
+1. **It directly matches Option 1**
+   - first run does a full backfill
+   - later runs stay incremental
 
-2. **It strengthens first-run historical backfill correctness**
-   - an initial run may encounter partially complete local state from interrupted manual testing or prior prototype runs
-   - the script should classify those files deterministically instead of only treating them as “already exists”
+2. **It is simple**
+   - one checkpoint-based decision
+   - no new workflow mode
+   - no added operator action
 
-3. **It preserves the preferred architecture**
-   - `main.py` remains thin
-   - the real logic stays in `lib/orchestration.py` plus small helper functions or a focused neighboring `lib/` module
+3. **It matches the master plan**
+   - the main plan already says first-run discovery behavior should be full historical backfill when no checkpoint exists
 
-4. **It de-risks later spreadsheet and Trio work**
-   - once the download-decision contract is reliable, later progress reporting and worker concurrency can reuse it instead of mixing orchestration changes with correctness changes
-
----
-
-## Specific Deliverable
-
-Extend the current sequential production flow so that, before attempting any file transfer, each planned record is classified into one of these practical outcomes:
-
-- needs full download
-- has complete local WARC plus valid fixity sidecars and can be skipped
-- has local WARC but missing or invalid fixity sidecars and needs local fixity regeneration
-- has a prior failed manifest entry and should be retried
-- cannot be trusted because required local verification failed and should be re-downloaded
-
-The implementation should cover the MVP rules already stated in the master plan:
-
-- local file missing => download needed
-- local file exists but size verification fails => download needed
-- SHA-256 sidecar missing or invalid => corrective action needed
-- manifest says prior attempt failed and retry is allowed => download needed
-
-Where the current codebase lacks one of the required verification signals, this step should add the smallest production-safe version needed for initial-download handling.
+4. **It fits the existing code shape**
+   - `main.py` stays thin
+   - `lib/orchestration.py` remains the main production flow
 
 ---
+## Specific Implementation Plan
 
-## Recommended Scope of the Change
+### 1. Use the checkpoint as the mode switch
 
-### 1. Introduce an explicit local download-decision helper
+In `lib/orchestration.py`, keep the current per-collection flow, but make the mode explicit:
 
-Add a helper in `lib/orchestration.py` or a small dedicated `lib/` module that accepts:
+- load local state
+- read `enumeration_checkpoint_store_time_max`
+- if it is missing or `null`, treat the collection as **first run / full backfill**
+- if it is present, treat the collection as **incremental / overlap-window run**
 
-- `CollectionJob` or `collection_id`
-- the current manifest/state object
-- one `PlannedDownload`
+No more complex signal is needed for this step.
 
-And returns a compact decision structure describing:
+### 2. Compute the WASAPI boundary differently for the two modes
 
-- `action`
-  - `download`
-  - `skip_complete`
-  - `regenerate_fixity`
-  - `redownload`
-- `reason`
-  - short, stable, loggable text
-- any verification metadata needed for follow-up logging/reporting
+For **first run**:
 
-This helper should become the authoritative gate for whether a file transfer is attempted.
+- do not use `now - 30 days`
+- instead, perform discovery with no effective historical cutoff, or with the simplest deliberately early cutoff already supported by the codebase
 
-### 2. Check local WARC completeness before skipping
+For **later runs**:
 
-Do not keep the current simple rule of:
+- keep the current behavior of using the checkpoint minus 30 days
 
-- “if destination exists, skip”
+The key point is:
 
-Instead, inspect the local state of:
+- **no checkpoint = backfill everything**
+- **checkpoint exists = normal recent overlap-window logic**
 
-- WARC file path
-- `.sha256` sidecar path
-- `.json` sidecar path
-- any manifest entry for the filename
+### 3. Keep downloading logic simple
 
-For the first production slice, a pragmatic completeness rule is:
+Do not redesign download decision-making in this step.
 
-- if WARC exists and both sidecars exist and the manifest does not indicate failure, treat as complete enough to skip
-- if WARC exists but one or both sidecars are missing, regenerate fixity sidecars without re-downloading unless another integrity signal says the WARC itself is untrustworthy
-- if manifest says the last attempt failed and the WARC is absent, re-download
-- if manifest says failure but a complete local WARC plus sidecars now exist, prefer local verification and normalize the manifest rather than blindly re-downloading
+For the Option-1 feature, the important behavior is:
 
-### 3. Add a minimum viable size/integrity check
+- historical records become visible during first-run discovery
+- the existing sequential flow then downloads files that are not already present locally
 
-The main plan says download is needed if local size verification fails.
+That is enough for this slice.
 
-Because the current orchestration appears not to persist authoritative remote expected size during planning, this step should choose the smallest clear implementation path:
+### 4. Save the checkpoint only after successful enumeration
 
-- first inspect discovered WASAPI records for a usable size field already available in the record payload
-- if available, thread that expected size into the planning/decision flow and compare against local file size
-- if not available in a stable way, document that limitation in the new plan and implement the rest of the decision rules now, leaving explicit TODOs for authoritative remote-size comparison later
+Keep the existing checkpoint rule from the main plan:
 
-The key requirement is to avoid pretending size validation exists if the source data is not actually available.
+- only write `enumeration_checkpoint_store_time_max` after WASAPI paging completes successfully
+- write the max observed `store-time`
 
-### 4. Regenerate fixity when the WARC is already present
+This ensures that once a collection finishes its first successful historical enumeration, later runs can switch to the normal overlap-window mode.
 
-The current flow writes fixity only after a successful new download.
+### 5. Log which mode was used
 
-Extend it so that when a local WARC already exists but fixity artifacts are missing or unusable, the code can:
+Add or adjust logging so it is obvious whether a collection ran in:
 
-- skip network download
-- compute SHA-256 over the existing WARC
-- rewrite `.sha256` and `.json` sidecars atomically
-- update the manifest to reflect a successful local fixity completion
+- `full-backfill-first-run` mode
+- `incremental-overlap-window` mode
 
-This is particularly important for initial-download handling where a prior interrupted run may have left a valid WARC but incomplete sidecars.
-
-### 5. Keep durable state updates aligned with the chosen action
-
-For each decision branch, make sure `state.json` remains consistent:
-
-- successful fresh download + fixity => manifest reflects success
-- successful fixity regeneration on an already-present WARC => manifest reflects success and valid sidecar paths
-- re-download failure => manifest reflects failure and increments retry/error information
-- verified skip of a complete local file => manifest may remain unchanged unless normalization is needed
-
-Do not introduce a large state-schema redesign in this step.
+This will make behavior easy to verify during early production runs.
 
 ---
+## Likely Code Touch Points
 
-## Suggested Code Shape
+- `warc_tracker_script/lib/wasapi_discovery.py`
+  - only if needed to support a no-cutoff or clearly early-cutoff discovery path
+- `warc_tracker_script/lib/orchestration.py`
+  - make the checkpoint-based mode decision explicit in the production flow
+- `warc_tracker_script/tests/test_wasapi_discovery.py`
+  - verify boundary computation behavior
+- `warc_tracker_script/tests/test_orchestration.py`
+  - verify first-run versus later-run orchestration behavior
 
-- keep `main.py` unchanged except for orchestration wiring if absolutely necessary
-- keep `lib/orchestration.py` as the production spine
-- add small helper structures/functions for local verification and decision-making
-- reuse existing `PlannedDownload`, `DownloadResult`, `FixityResult`, and manifest-update helpers where practical
-
-A likely clean shape is:
-
-- decision helper:
-  - classifies each `PlannedDownload`
-- execution helper:
-  - performs download, skip, or fixity-regeneration based on that decision
-- summary/logging helper:
-  - reports how many files were downloaded, skipped-as-complete, repaired-via-fixity-regeneration, or failed
-
-This keeps the current sequential flow intact while making the file-level behavior more correct.
+Keep `warc_tracker_script/main.py` thin unless a tiny orchestration call adjustment is truly required.
 
 ---
-
 ## Minimum Test Coverage
 
-Add focused `unittest` coverage for the decision rules and their execution effects.
+Add focused `unittest` coverage for:
 
-Priority cases:
+- no checkpoint => first-run full backfill behavior
+- checkpoint present => 30-day overlap-window behavior
+- successful first-run enumeration writes the checkpoint
+- later runs continue using the checkpointed overlap-window path
 
-- discovered file with no local WARC => classified for download
-- discovered file with local WARC and both sidecars present => classified as complete skip
-- discovered file with local WARC but missing `.sha256` or `.json` => fixity regeneration path
-- discovered file with manifest failure and no current WARC => retry download path
-- discovered file with manifest failure but complete local artifacts present => normalize/skip or verify without network download
-- local file exists with mismatched expected size, if expected size is available from discovery data => re-download path
-- fixity regeneration success updates manifest correctly
-- fixity regeneration failure updates manifest correctly and does not claim download success
-
-Likely test files:
-
-- `warc_tracker_script/tests/test_orchestration.py`
-- possibly `warc_tracker_script/tests/test_fixity.py` if helper behavior needs extension
-- possibly a new focused test module if the decision helper becomes large enough to deserve isolated tests
+The tests do not need to cover spreadsheet updates or Trio behavior for this step.
 
 ---
-
 ## Out of Scope for This Step
 
-- spreadsheet start/progress/final reporting
-- Trio concurrency and worker queues
+- spreadsheet write/update behavior
+- Trio concurrency
 - lock/cron wrapper hardening
-- range-resume downloads
-- major redesign of `state.json`
-- non-WARC derivative handling
+- more advanced local file verification logic
+- any new operator-facing bootstrap mode
 
 ---
-
 ## Success Criteria
 
-- [ ] the sequential orchestrator no longer treats “destination WARC exists” as the only skip rule
-- [ ] a discovered WARC with complete local artifacts is skipped without network download
-- [ ] a discovered WARC with existing file but missing/invalid sidecars triggers local fixity repair
-- [ ] manifest-based retry behavior exists for prior failed downloads
-- [ ] any implemented size verification is based on actual source metadata present in discovery records, not guesswork
-- [ ] focused `unittest` coverage exists for the core initial-download decision branches
+- [ ] a collection with no `enumeration_checkpoint_store_time_max` is treated as first-run full backfill
+- [ ] a collection with a checkpoint uses the existing 30-day overlap-window logic
+- [ ] the checkpoint is written after successful historical enumeration
+- [ ] the current sequential production flow remains the main execution path
+- [ ] focused `unittest` coverage exists for first-run versus checkpointed behavior
 
 ---
-
 ## Likely Follow-Up After This Step
 
-1. implement spreadsheet reporting for start/final collection status from the sequential flow
-2. add mid-download progress reporting once file-level correctness rules are stable
-3. implement the Trio architecture with two download workers and one sheet updater
+1. verify the feature on a small set of real collections
+2. implement spreadsheet reporting from the sequential flow
+3. later move toward the planned Trio architecture
 
 ---
-
 ## Handoff Notes
 
 If you pick this up in a new session, re-read:
 
 - `warc_tracker_script/AGENTS.md`
+- `warc_tracker_script/PLAN__handling_historical_warcs.md`
 - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
 - `warc_tracker_script/PLAN__next_single_step.md`
-- `warc_tracker_script/lib/orchestration.py`
 
 Quick mental model:
 
-- first-run historical enumeration is already in place
-- the current remaining gap is file-level correctness for initial-download handling
-- the next best production slice is to formalize download-vs-skip-vs-fixity-repair decisions in the existing sequential flow
-- after that, spreadsheet reporting becomes easier because the orchestrator will have clearer per-file outcomes to summarize
+- this step is only about the **simple checkpoint check**
+- no checkpoint means **backfill everything**
+- checkpoint present means **use the normal 30-day overlap window**
+- keep the implementation small and inside the existing sequential orchestration
