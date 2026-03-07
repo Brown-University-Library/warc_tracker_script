@@ -1,4 +1,4 @@
-# Next Single Step: Durable Local Manifest Updates for Download and Fixity Outcomes
+# Next Single Step: Spreadsheet Write/Update Behavior
 
 ## Context for Future Agents
 
@@ -13,27 +13,27 @@
 - `main.py` remains a thin entry point that loads config, configures logging, opens an authenticated `httpx.Client`, and iterates collection jobs.
 - `lib/orchestration.py` processes collections sequentially.
 - `lib/collection_sheet.py` loads active collection jobs from the spreadsheet.
-- `lib/local_state.py` persists per-collection `state.json` atomically.
+- `lib/local_state.py` loads and saves `state.json` atomically and now records durable per-file download/fixity outcomes.
 - `lib/wasapi_discovery.py` performs production WASAPI discovery with overlap-window checkpoint logic.
 - `lib/storage_layout.py` derives year/month partitions from WARC filenames and computes planned WARC/fixity destinations.
 - `lib/downloader.py` streams WARC files, writes to `*.partial`, removes stale partial files on retry, and atomically renames successful downloads into place.
 - `lib/fixity.py` computes SHA-256 and writes `.sha256` and `.json` sidecars for successfully downloaded WARCs.
-- The production flow now reaches actual local WARC download plus fixity creation, but it does not yet persist per-file manifest entries for download/fixity success or failure.
+- The production flow now reaches local download, fixity creation, and durable manifest/state updates, but it still does not write collection-level progress or summary updates back to the spreadsheet.
 
 ---
 ## Goal of This Step
 
-Implement the first production version of **durable per-file local manifest updates** so the current sequential flow moves from “downloaded and fixity-written during this run” to “durably recorded file status in `state.json` for future retry/dedupe behavior.”
+Implement the first production version of **spreadsheet write/update behavior** so the script can report collection progress and completion status back to the tracking sheet while keeping the local filesystem state as the source of truth.
 
-This step should add a small manifest/state layer that:
+This step should add a small sheet-update layer that can:
 
-- records download success/failure per filename
-- records fixity success/failure per filename
-- records last-attempt timing for each processed file
-- records a small amount of retry/error summary metadata
-- writes the updated collection state durably through existing local-state helpers
+- write an in-progress marker when a collection starts processing
+- write a final collection summary when processing finishes
+- update a small set of collection-level sheet fields if they are present
+- keep spreadsheet logic out of `main.py`
+- keep the implementation sequential for now
 
-This step should **not** yet implement spreadsheet writes or Trio concurrency.
+This step should **not** yet implement Trio concurrency or the separate async sheet-updater task.
 
 ---
 ## Why This Is the Right Next Step
@@ -43,76 +43,84 @@ This step should **not** yet implement spreadsheet writes or Trio concurrency.
    - Path planning is done.
    - Downloading is done.
    - Fixity generation is done.
-   - The next missing production behavior is durable manifest/state recording.
+   - Durable manifest/state recording is done.
+   - The next missing production behavior is spreadsheet reporting.
 
-2. **It enables the project’s intended dedupe/retry model**
-   - The master plan says retries and dedupe are manifest-based.
-   - Without per-file state updates, the script cannot yet fully support that design.
+2. **It matches the master plan’s intended control/reporting surface**
+   - The spreadsheet is meant to show start, progress, and summary information.
+   - Local state already holds the correctness data needed to compute summary writes.
 
-3. **It fits the existing `main.py`-first flow**
-   - `main.py` can remain thin.
-   - `lib/orchestration.py` can update local state after download/fixity outcomes without introducing async structure yet.
+3. **It fits the existing thin-`main.py` sequential flow**
+   - `main.py` can remain orchestration-only.
+   - `lib/orchestration.py` can call a small sheet-update helper layer at clear checkpoints.
 
 4. **It preserves a small implementation increment**
-   - Local manifest mutation can be validated before adding spreadsheet writes or Trio workers.
+   - Spreadsheet behavior can be validated before introducing Trio workers or a separate sheet-updater task.
 
 ---
 ## In-Scope Deliverables
 
-Update the local-state layer and orchestration flow so the current sequential production path can, for each planned download attempt:
+Update the sheet-integration layer and orchestration flow so the current sequential production path can, for each processed collection:
 
-- identify the filename being processed
-- record successful download outcomes in `state['files'][filename]`
-- record failed download outcomes in `state['files'][filename]`
-- record fixity success/failure when fixity is attempted
-- persist timestamps such as `last_attempt_at`
-- persist a small retry/error summary such as `error_count` and `error_summary`
-- save the updated state durably at an appropriate point in collection processing
+- identify the target collection row using existing collection-job data
+- write an **In Progress** marker when collection processing begins
+- write a final summary update when collection processing finishes
+- clear the in-progress marker at the end
+- write a small set of collection-level fields when the corresponding columns are present
+
+Likely fields to support first:
+
+- `Server File path- collection level`
+- `Last WASAPI fetch`
+- `File Count ?`
+- `Total Size`
+- `In Progress marker`
 
 And add focused tests, likely in:
 
-- `warc_tracker_script/tests/test_local_state.py`
+- `warc_tracker_script/tests/test_collection_sheet.py`
 - `warc_tracker_script/tests/test_orchestration.py`
 
 ---
 ## Out of Scope for This Step
 
-- No spreadsheet writes.
 - No Trio concurrency.
+- No separate async sheet-updater worker.
 - No redesign of `main.py`.
+- No per-file sheet writes.
 - No remote checksum comparison.
-- No large schema redesign beyond what is needed for practical per-file manifest entries.
 
 ---
 ## Required Behavior from the Master Plan
 
-### Manifest/state model
+### When to write
 
-Per collection, `state.json` should be able to hold:
+For each collection, the implementation should support:
 
-- `enumeration_checkpoint_store_time_max`
-- `files` mapping keyed by filename
+1. writing an **In Progress** marker when processing begins
+2. writing a final summary update when processing finishes
+3. clearing the in-progress marker at the end
 
-For each filename entry, the implementation should support values such as:
+For this step, it is acceptable to defer mid-download progress batching and implement only start/final writes in the current sequential flow.
 
-- `status`
-- `last_attempt_at`
-- `error_count`
-- `error_summary`
+### What to write
 
-For this step, it is acceptable to add a few explicit fields that make download/fixity results durable and easy to inspect, for example:
+At collection level, update only a small set of fields if they are present:
 
-- download status/result fields
-- fixity status/result fields
-- source URL if useful
-- stored local paths if useful
+- `Server File path- collection level`
+- `Last WASAPI fetch`
+- `File Count ?`
+- `Total Size`
+- `In Progress marker`
 
-### Failure behavior
+The implementation should tolerate missing columns and avoid failing the whole collection just because one expected reporting column is absent.
 
-- a failed download should record a durable failed attempt
-- a fixity failure after a successful download should also be recorded durably
-- a successful WARC download should not be erased from disk just because fixity writing failed
-- checkpoint advancement rules should remain as they are now; do not couple them to download/fixity success
+### Source-of-truth rule
+
+- local filesystem state remains the source of truth
+- spreadsheet writes are reporting/control only
+- spreadsheet write failures should be logged clearly
+- spreadsheet write failures should not erase local files or manifest state
 
 ---
 ## Recommended API Shape
@@ -120,34 +128,31 @@ For this step, it is acceptable to add a few explicit fields that make download/
 Keep the change small and explicit. Illustrative directions:
 
 ```python
-def build_file_manifest_entry(...) -> dict[str, object]:
+def build_collection_summary_update(...) -> dict[str, object]:
     ...
 
 
-def update_file_manifest_entry(
-    state: dict[str, object],
-    filename: str,
-    ...
-) -> dict[str, object]:
+def write_collection_progress_update(... ) -> None:
     ...
 ```
 
 Exact naming can vary if the interface stays simple and testable.
 
-It is also acceptable to keep the helper layer minimal and have `lib/orchestration.py` call a small number of top-level local-state helpers.
+It is acceptable to add a small helper module under `lib/` for spreadsheet write behavior if that keeps orchestration readable.
 
 ---
 ## Orchestration Integration Requirement
 
-Extend the current sequential flow in `lib/orchestration.py` so that after a planned file is processed it can:
+Extend the current sequential flow in `lib/orchestration.py` so that it can:
 
-1. determine whether download succeeded or failed
-2. determine whether fixity succeeded or failed when attempted
-3. update `state['files'][filename]` with durable per-file outcome data
-4. save the collection state durably
-5. preserve the existing thin `main.py` approach
+1. write a start marker before discovery/download work begins
+2. process the collection through the existing sequential flow
+3. compute a collection-level summary from the run results and local paths
+4. write a final collection summary at the end
+5. clear the in-progress marker before returning
+6. preserve the existing thin `main.py` approach
 
-Do this without introducing spreadsheet abstractions or Trio worker structure yet.
+Do this without introducing Trio worker structure yet.
 
 ---
 ## Test Requirements
@@ -156,50 +161,49 @@ Add focused `unittest` coverage.
 
 ### Minimum tests to include
 
-- **Manifest entry happy path after successful download and fixity**
-  - state contains a filename entry marked as successfully processed
+- **Start marker write**
+  - collection processing triggers an in-progress update
 
-- **Download failure recording**
-  - failed download increments or records error metadata and durable failed status
+- **Final summary write**
+  - successful collection processing writes the expected collection-level summary payload
 
-- **Fixity failure recording**
-  - successful download plus failed fixity records the partial-success state clearly
+- **Missing-column tolerance**
+  - absent optional sheet columns do not crash the reporting flow
 
-- **State persistence integration**
-  - orchestration saves updated collection state after processing outcomes
+- **Spreadsheet write failure handling**
+  - write failures are surfaced clearly without breaking local manifest/file state behavior unless explicitly intended
 
-- **Existing checkpoint behavior remains intact**
-  - checkpoint save logic for successful/incomplete discovery still behaves as before
+- **Orchestration integration**
+  - sequential collection processing invokes the sheet update layer at start and finish
 
-Keep tests local and mocked where appropriate; do not add live network tests.
+Keep tests local and mocked where appropriate; do not add live network or live Google Sheets tests.
 
 ---
 ## Suggested Implementation Notes
 
 - Keep `main.py` thin.
-- Prefer small helper functions in `lib/local_state.py` or another small `lib/` helper module rather than embedding all manifest logic inline.
-- Use UTC ISO-8601 timestamps.
-- Keep the manifest schema explicit but small.
+- Prefer small helper functions in `lib/collection_sheet.py` or a nearby `lib/` helper module rather than embedding sheet-write logic inline.
+- Reuse existing collection row metadata from sheet ingestion rather than re-discovering rows in an ad hoc way.
+- Keep write payloads explicit and small.
 - Match repository style from `AGENTS.md` and `ruff.toml`.
-- Make the state updates durable with the existing atomic-save approach.
+- Log spreadsheet write failures clearly, but keep local-state durability separate.
 
 ---
 ## Success Criteria
 
-- [ ] per-file manifest entries are written to `state.json`
-- [ ] successful downloads are recorded durably
-- [ ] failed downloads are recorded durably
-- [ ] fixity failures are recorded durably
-- [ ] orchestration persists updated collection state after file processing
-- [ ] focused `unittest` coverage exists for happy-path and failure-path manifest recording
+- [ ] collection processing writes an in-progress marker to the spreadsheet
+- [ ] collection processing writes a final summary update to the spreadsheet
+- [ ] the in-progress marker is cleared at the end of processing
+- [ ] the implementation tolerates missing optional sheet columns
+- [ ] focused `unittest` coverage exists for the new write/update behavior
 
 ---
 ## Likely Follow-Up After This Step
 
-After durable local manifest updates are implemented, the next step should likely be:
+After spreadsheet write/update behavior is implemented, the next step should likely be:
 
-1. implement spreadsheet write/update behavior
-2. then decide whether Trio worker structure or operational hardening should come next
+1. implement the `Trio` flow with two download workers plus a separate sheet updater
+2. then add lock/cron hardening
 
 ---
 ## Handoff Notes for the Next Agent / New Session
@@ -214,10 +218,6 @@ Quick mental model of the codebase right now:
 
 - `main.py` is a thin entry point and should stay that way.
 - `lib/orchestration.py` is the current sequential production flow.
-- `lib/wasapi_discovery.py` returns discovered records and checkpoint info.
-- `lib/storage_layout.py` maps discovered filenames to deterministic WARC and fixity destinations.
-- `lib/downloader.py` performs the safe local WARC write path.
-- `lib/fixity.py` performs SHA-256 and sidecar generation.
-- `lib/local_state.py` can already load and save collection state atomically, but it does not yet manage durable per-file outcome entries beyond the top-level checkpoint structure.
-
-The immediate objective is to add the smallest correct manifest/state update layer that plugs into the existing sequential orchestration flow and durably records per-file download and fixity outcomes for future retry/dedupe behavior.
+- `lib/local_state.py` now persists per-file manifest outcomes durably.
+- `lib/collection_sheet.py` already handles sheet ingestion and is the most likely home for small reporting/write helpers unless a separate `lib/` helper proves cleaner.
+- The immediate objective is to add the smallest correct spreadsheet update layer that plugs into the existing sequential orchestration flow and reports collection-level start/final status without introducing async structure yet.
