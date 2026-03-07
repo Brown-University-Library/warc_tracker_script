@@ -1,6 +1,6 @@
 # warc-tracker-script
 
-## Decisions made
+## FAQs
 
 ### store-time and lookback
 
