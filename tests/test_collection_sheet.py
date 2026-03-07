@@ -2,7 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -11,6 +11,7 @@ from lib.collection_sheet import (
     CollectionSheetContractError,
     CollectionSummaryUpdate,
     HeaderLocation,
+    load_collection_sheet_context,
     parse_collection_id,
     parse_collection_jobs,
     update_collection_final_reporting,
@@ -79,6 +80,42 @@ class TestParseCollectionJobs(TestCase):
         result = parse_collection_jobs(values)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].collection_id, 789)
+
+    def test_new_reporting_column_labels_are_accepted(self):
+        """
+        Checks that the new row-3 reporting column labels are accepted.
+        """
+        worksheet = MagicMock()
+        worksheet.get_all_values.return_value = [
+            ['Notes above header'],
+            ['More notes'],
+            [
+                'Collection ID',
+                'Active/Inactive',
+                'Status-Main',
+                'Status-Detail',
+                'sum--Last-Check-Timestamp',
+                'sum--Downloaded-WARCs-Count',
+                'sum--Downloaded-WARCs-Size',
+                'sum--Dowlnloaded-WARCs-Server-Path',
+            ],
+            ['123', 'Active', '', '', '', '', '', ''],
+        ]
+        client = MagicMock()
+        spreadsheet = MagicMock()
+        spreadsheet.worksheet.return_value = worksheet
+        client.open_by_key.return_value = spreadsheet
+
+        with patch('lib.collection_sheet.get_gspread_client', return_value=client):
+            result = load_collection_sheet_context('spreadsheet-id')
+
+        self.assertEqual(result.header_location.header_row_index, 2)
+        self.assertEqual(result.header_location.column_map['processing_status_main'], 2)
+        self.assertEqual(result.header_location.column_map['processing_status_detail'], 3)
+        self.assertEqual(result.header_location.column_map['summary_status_last_wasapi_check'], 4)
+        self.assertEqual(result.header_location.column_map['summary_status_downloaded_warcs_count'], 5)
+        self.assertEqual(result.header_location.column_map['summary_status_downloaded_warcs_size'], 6)
+        self.assertEqual(result.header_location.column_map['summary_status_server_path'], 7)
 
 
 class TestCollectionReportingContract(TestCase):

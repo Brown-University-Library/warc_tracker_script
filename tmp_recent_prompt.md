@@ -2,3 +2,16 @@
 - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
 - review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them.
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
+
+- I've added the following columns to the spreadsheet (the 'sum' stands for "summary"):
+  - Status-Main	
+  - Status-Detail	
+  - sum--Last-Check-Timestamp
+  - sum--Downloaded-WARCs-Count
+  - sum--Downloaded-WARCs-Size
+  - sum--Dowlnloaded-WARCs-Server-Path
+- These column-labels are in row-3.
+- Review `warc_tracker_script/AGENTS.md` for coding-directives.
+- Review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` to understand what's been done and not-done.
+- Update relevant spreadsheet-code-files to expect those columns/names.
+- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.

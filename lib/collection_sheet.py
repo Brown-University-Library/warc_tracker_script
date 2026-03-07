@@ -28,12 +28,24 @@ HEADER_ALIASES: dict[str, set[str]] = {
     'collection_url': {'collection url'},
     'collection_name': {'collection name'},
     'active_inactive': {'active/inactive', 'active / inactive'},
-    'processing_status_main': {'processing_status_main'},
-    'processing_status_detail': {'processing_status_detail'},
-    'summary_status_last_wasapi_check': {'summary_status_last_wasapi_check'},
-    'summary_status_downloaded_warcs_count': {'summary_status_downloaded_warcs_count'},
-    'summary_status_downloaded_warcs_size': {'summary_status_downloaded_warcs_size'},
-    'summary_status_server_path': {'summary_status_server_path'},
+    'processing_status_main': {'processing_status_main', 'status-main'},
+    'processing_status_detail': {'processing_status_detail', 'status-detail'},
+    'summary_status_last_wasapi_check': {
+        'summary_status_last_wasapi_check',
+        'sum--last-check-timestamp',
+    },
+    'summary_status_downloaded_warcs_count': {
+        'summary_status_downloaded_warcs_count',
+        'sum--downloaded-warcs-count',
+    },
+    'summary_status_downloaded_warcs_size': {
+        'summary_status_downloaded_warcs_size',
+        'sum--downloaded-warcs-size',
+    },
+    'summary_status_server_path': {
+        'summary_status_server_path',
+        'sum--dowlnloaded-warcs-server-path',
+    },
 }
 
 
