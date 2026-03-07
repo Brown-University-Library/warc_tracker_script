@@ -1,3 +1,4 @@
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -162,6 +163,21 @@ def get_next_page_number(page_payload: dict[str, object], current_page_number: i
     return result
 
 
+def build_payload_debug_summary(page_payload: dict[str, object], page_records: list[dict[str, object]]) -> dict[str, object]:
+    """
+    Builds a compact summary of one WASAPI response payload for debug logging.
+    """
+    result = {
+        'keys': sorted(page_payload.keys()),
+        'record_count': len(page_records),
+        'count': page_payload.get('count'),
+        'next': page_payload.get('next'),
+        'previous': page_payload.get('previous'),
+        'request_url': page_payload.get('request-url'),
+    }
+    return result
+
+
 def fetch_collection_discovery(
     client: httpx.Client,
     base_url: str,
@@ -189,6 +205,13 @@ def fetch_collection_discovery(
         response: httpx.Response | None = None
         try:
             response = client.get(base_url, params=params)
+            log.debug(
+                'Collection %s requested WASAPI page %s: %s params=%s',
+                collection_id,
+                page_number,
+                response.request.url,
+                params,
+            )
             request_records.append(
                 DiscoveryRequestRecord(
                     page_number=page_number,
@@ -203,6 +226,18 @@ def fetch_collection_discovery(
             if not isinstance(payload, dict):
                 raise WasapiDiscoveryError('WASAPI response JSON is not an object.')
             page_records = extract_discovery_records(payload)
+            log.debug(
+                'Collection %s page %s payload summary: %s',
+                collection_id,
+                page_number,
+                build_payload_debug_summary(payload, page_records),
+            )
+            log.debug(
+                'Collection %s page %s full payload: %s',
+                collection_id,
+                page_number,
+                json.dumps(payload, sort_keys=True),
+            )
             discovered_records.extend(page_records)
             next_page_number = get_next_page_number(payload, page_number)
             if next_page_number is None:
@@ -229,7 +264,9 @@ def fetch_collection_discovery(
             )
             if isinstance(exc, WasapiDiscoveryError):
                 raise WasapiDiscoveryError(str(exc), partial_result) from exc
-            raise WasapiDiscoveryError(f'Failed fetching collection {collection_id} page {page_number}: {exc}', partial_result) from exc
+            raise WasapiDiscoveryError(
+                f'Failed fetching collection {collection_id} page {page_number}: {exc}', partial_result
+            ) from exc
 
     max_store_time = compute_max_store_time(discovered_records)
     result = DiscoveryResult(
