@@ -48,7 +48,8 @@ Not yet implemented in the production backup flow:
 ## Locked decisions
 
 - Discovery clock: **`store-time` only**
-- Overlap window: **30 days**
+- First-run discovery behavior: **full historical backfill when no checkpoint exists**
+- Overlap window: **30 days after the first successful checkpoint exists**
 - Dedup / retry basis: **local manifest keyed by filename**
 - File type for MVP: **WARC only**
 - Concurrency model: **Trio with 2 dedicated download workers + 1 sheet updater**
@@ -117,12 +118,16 @@ Each collection needs a small local JSON state file containing at least:
 For each collection:
 
 1. Read `enumeration_checkpoint_store_time_max` from local state.
-2. If missing, treat this as a first run and use `now` as the reference point.
-3. Compute:
+2. If a checkpoint exists, treat it as the reference point.
+3. If no checkpoint exists, treat this as a first run and perform a full historical backfill for that collection.
+4. When a checkpoint exists, compute:
    - `after_datetime = reference_checkpoint - 30 days`
-4. Query WASAPI with `store-time-after=<after_datetime>`.
+5. Query WASAPI as follows:
+   - on first run with no checkpoint: do not use the recent-only `now - 30 days` boundary
+   - on later runs with a checkpoint: use `store-time-after=<after_datetime>`
 
-This overlap window protects against missed files from interrupted paging or transient API problems.
+This design ensures that a collection with no prior local backup can still reach full historical coverage, while later runs retain
+the overlap-window protection against missed files from interrupted paging or transient API problems.
 
 ### Checkpoint advancement rule
 Advance the local checkpoint only when:
@@ -575,8 +580,10 @@ Keep this minimal and practical.
 1. [x] Define configuration and required env vars.
 2. [x] Implement spreadsheet ingestion with header detection and canonical field mapping.
 3. [x] Implement per-collection local `state.json`.
-4. [x] Implement WASAPI discovery helpers with `store-time` plus 30-day overlap.
-5. [x] Integrate sheet ingestion, local state, and WASAPI discovery into the current sequential production orchestration flow.
+4. [ ] Update WASAPI discovery and orchestration so a collection with no checkpoint performs a full historical backfill, while
+    checkpointed collections continue to use `store-time` plus a 30-day overlap.
+5. [ ] Integrate the first-run full-backfill behavior into the current sequential production orchestration flow and verify that
+    the checkpoint is written after successful historical enumeration.
 6. [x] Implement local path building using the year/month collection layout.
 7. [x] Implement downloader with temp-file then atomic rename.
 8. [x] Implement SHA-256 sidecar writing.
