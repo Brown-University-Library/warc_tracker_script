@@ -1,7 +1,4 @@
-- sorry, but your `warc_tracker_script/PLAN__next_single_step.md` is much too complex.
-- review the plan at `warc_tracker_script/PLAN__handling_historical_warcs.md` -- specifically, and only, "Option-1".
-- i believe there can be a simple check of either state.json or some other simple check, which should put the code into "download-everything" mode -- or "download new files since the 30-day lookback window".
-- review the `warc_tracker_script/AGENTS.md` for code-directives to follow.
-- review the main plan at `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the project.
-- based on that Option-1 of `warc_tracker_script/PLAN__handling_historical_warcs.md`, come up with a plan to implement that basic feature, and save the new plan to `warc_tracker_script/PLAN__next_single_step.md`, overwriting all previous content in that file.
+- review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
+- review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
+- review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them.
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.

@@ -182,7 +182,7 @@ def fetch_collection_discovery(
     client: httpx.Client,
     base_url: str,
     collection_id: int,
-    after_datetime: datetime,
+    after_datetime: datetime | None,
     page_size: int = DEFAULT_PAGE_SIZE,
 ) -> DiscoveryResult:
     """
@@ -191,8 +191,8 @@ def fetch_collection_discovery(
     page_number = 1
     discovered_records: list[dict[str, object]] = []
     request_records: list[DiscoveryRequestRecord] = []
-    after_datetime_utc = after_datetime.astimezone(UTC)
-    formatted_after_datetime = format_wasapi_datetime(after_datetime_utc)
+    after_datetime_utc = after_datetime.astimezone(UTC) if after_datetime is not None else None
+    formatted_after_datetime = format_wasapi_datetime(after_datetime_utc) if after_datetime_utc is not None else None
 
     while True:
         requested_at = datetime.now(UTC)
@@ -200,8 +200,9 @@ def fetch_collection_discovery(
             'collection': collection_id,
             'page': page_number,
             'page_size': page_size,
-            'store-time-after': formatted_after_datetime,
         }
+        if formatted_after_datetime is not None:
+            params['store-time-after'] = formatted_after_datetime
         response: httpx.Response | None = None
         try:
             response = client.get(base_url, params=params)

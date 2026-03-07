@@ -13,6 +13,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 from lib.collection_sheet import CollectionJob, HeaderLocation
 from lib.fixity import FixityResult
 from lib.orchestration import (
+    DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN,
+    DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW,
     STATUS_COMPLETED_WITH_SOME_FILE_FAILURES,
     STATUS_DOWNLOADED_WITHOUT_ERRORS,
     build_collection_failure_report,
@@ -20,6 +22,7 @@ from lib.orchestration import (
     build_planned_download_paths,
     build_planned_downloads,
     count_pending_download_candidates,
+    determine_collection_discovery_mode,
     get_archive_it_credentials,
     get_downloaded_storage_root,
     get_record_source_url,
@@ -186,6 +189,28 @@ class TestProcessCollectionJob(TestCase):
     Test cases for per-collection orchestration.
     """
 
+    def test_determine_collection_discovery_mode_uses_full_backfill_without_checkpoint(self):
+        """
+        Checks that a missing checkpoint selects first-run full backfill mode.
+        """
+        now = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+
+        discovery_mode, after_datetime = determine_collection_discovery_mode(None, now)
+
+        self.assertEqual(discovery_mode, DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN)
+        self.assertIsNone(after_datetime)
+
+    def test_determine_collection_discovery_mode_uses_overlap_window_with_checkpoint(self):
+        """
+        Checks that a checkpoint selects incremental overlap-window mode.
+        """
+        now = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+
+        discovery_mode, after_datetime = determine_collection_discovery_mode('2026-03-01T12:00:00Z', now)
+
+        self.assertEqual(discovery_mode, DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW)
+        self.assertEqual(after_datetime, datetime(2026, 1, 30, 12, 0, 0, tzinfo=UTC))
+
     def test_updates_checkpoint_when_discovery_succeeds(self):
         """
         Checks that successful discovery persists the updated checkpoint.
@@ -241,8 +266,7 @@ class TestProcessCollectionJob(TestCase):
                 'lib.orchestration.load_collection_state',
                 return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
             ),
-            patch('lib.orchestration.compute_store_time_after_datetime') as mock_compute,
-            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result) as mock_fetch,
             patch('lib.orchestration.save_collection_state') as mock_save,
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
             patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
@@ -253,7 +277,6 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.update_collection_final_reporting') as mock_final_reporting,
             patch('lib.orchestration.datetime') as mock_datetime,
         ):
-            mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
             mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
             result = process_collection_job(
                 client,
@@ -266,6 +289,8 @@ class TestProcessCollectionJob(TestCase):
 
         saved_state = mock_save.call_args.args[2]
         self.assertEqual(saved_state['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
+        self.assertIsNone(mock_fetch.call_args.kwargs['after_datetime'])
+        self.assertEqual(mock_update_status.call_args.args[3].processing_status_detail, 'full historical backfill')
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_download.call_count, 1)
@@ -334,7 +359,6 @@ class TestProcessCollectionJob(TestCase):
                 'lib.orchestration.load_collection_state',
                 return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
             ),
-            patch('lib.orchestration.compute_store_time_after_datetime') as mock_compute,
             patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
             patch('lib.orchestration.save_collection_state') as mock_save,
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
@@ -346,7 +370,6 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.update_collection_final_reporting'),
             patch('lib.orchestration.datetime') as mock_datetime,
         ):
-            mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
             mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
             process_collection_job(
                 client,
@@ -413,7 +436,6 @@ class TestProcessCollectionJob(TestCase):
                 'lib.orchestration.load_collection_state',
                 return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
             ),
-            patch('lib.orchestration.compute_store_time_after_datetime') as mock_compute,
             patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
             patch('lib.orchestration.save_collection_state'),
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']),
@@ -425,7 +447,6 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.update_collection_final_reporting'),
             patch('lib.orchestration.datetime') as mock_datetime,
         ):
-            mock_compute.return_value = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
             mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
             result = process_collection_job(
                 client,
@@ -440,6 +461,69 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_log_summary.call_args.args[3], [download_result])
         self.assertEqual(mock_log_summary.call_args.args[4], [])
         self.assertEqual(result.status_update.processing_status_main, STATUS_COMPLETED_WITH_SOME_FILE_FAILURES)
+
+    def test_checkpointed_run_uses_overlap_window_boundary_for_discovery(self):
+        """
+        Checks that a checkpointed collection uses the overlap-window boundary.
+        """
+        collection_job = CollectionJob(
+            collection_id=123,
+            repository='UA',
+            collection_url='https://example.com',
+            collection_name='Example',
+            row_number=7,
+        )
+        client = MagicMock(spec=httpx.Client)
+        worksheet = MagicMock()
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 0,
+                'processing_status_detail': 1,
+                'summary_status_last_wasapi_check': 2,
+                'summary_status_downloaded_warcs_count': 3,
+                'summary_status_downloaded_warcs_size': 4,
+                'summary_status_server_path': 5,
+            },
+        )
+        discovery_result = MagicMock()
+        discovery_result.records = []
+        discovery_result.request_records = [{'page': 1}]
+        discovery_result.completed_successfully = True
+        discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+
+        with (
+            patch(
+                'lib.orchestration.load_collection_state',
+                return_value={'enumeration_checkpoint_store_time_max': '2026-03-01T12:00:00Z', 'files': {}},
+            ),
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result) as mock_fetch,
+            patch('lib.orchestration.save_collection_state') as mock_save,
+            patch('lib.orchestration.log_planned_download_paths'),
+            patch('lib.orchestration.log_collection_download_summary'),
+            patch('lib.orchestration.update_collection_processing_status') as mock_update_status,
+            patch('lib.orchestration.update_collection_final_reporting'),
+            patch('lib.orchestration.datetime') as mock_datetime,
+        ):
+            mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+            process_collection_job(
+                client,
+                collection_job,
+                Path('/tmp/storage'),
+                'https://example.org/wasapi',
+                worksheet,
+                header_location,
+            )
+
+        self.assertEqual(
+            mock_fetch.call_args.kwargs['after_datetime'],
+            datetime(2026, 1, 30, 12, 0, 0, tzinfo=UTC),
+        )
+        self.assertEqual(
+            mock_update_status.call_args.args[3].processing_status_detail,
+            'store-time-after 2026-01-30T12:00:00+00:00',
+        )
+        self.assertEqual(mock_save.call_args.args[2]['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
 
 
 class TestCollectionReportingHelpers(TestCase):

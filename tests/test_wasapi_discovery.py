@@ -112,6 +112,36 @@ class TestFetchCollectionDiscovery(TestCase):
     Test cases for paginated WASAPI discovery.
     """
 
+    def test_first_run_without_boundary_omits_store_time_after_param(self):
+        """
+        Checks that first-run discovery does not send a store-time-after filter.
+        """
+        client = FakeClient(
+            [
+                FakeResponse(
+                    'https://example.org/wasapi?page=1',
+                    {
+                        'results': [
+                            {'filename': 'alpha.warc.gz', 'store-time': '2026-02-01T01:00:00Z'},
+                        ],
+                        'next': None,
+                    },
+                ),
+            ],
+        )
+
+        result = fetch_collection_discovery(
+            client=client,
+            base_url='https://example.org/wasapi',
+            collection_id=123,
+            after_datetime=None,
+            page_size=50,
+        )
+
+        self.assertTrue(result.completed_successfully)
+        self.assertIsNone(result.after_datetime)
+        self.assertNotIn('store-time-after', client.calls[0]['params'])
+
     def test_pagination_happy_path(self):
         """
         Checks that multiple pages are combined and max store-time is computed.

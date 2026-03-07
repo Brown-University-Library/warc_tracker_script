@@ -36,6 +36,8 @@ STATUS_DOWNLOADED_WITHOUT_ERRORS = 'downloaded-without-errors'
 STATUS_COMPLETED_WITH_SOME_FILE_FAILURES = 'completed-with-some-file-failures'
 STATUS_DISCOVERY_FAILED = 'discovery-failed'
 STATUS_SPREADSHEET_UPDATE_FAILED = 'spreadsheet-update-failed'
+DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN = 'full-backfill-first-run'
+DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW = 'incremental-overlap-window'
 
 
 @dataclass(frozen=True)
@@ -426,18 +428,38 @@ def build_collection_failure_report(
     return result
 
 
+def determine_collection_discovery_mode(
+    checkpoint_store_time_max: str | None,
+    now: datetime,
+) -> tuple[str, datetime | None]:
+    """
+    Determines the collection discovery mode and optional store-time-after boundary.
+    """
+    discovery_mode = DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN
+    after_datetime: datetime | None = None
+    if checkpoint_store_time_max is not None:
+        discovery_mode = DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW
+        after_datetime = compute_store_time_after_datetime(checkpoint_store_time_max, now)
+    result = (discovery_mode, after_datetime)
+    return result
+
+
 def write_collection_start_status(
     worksheet: gspread.Worksheet,
     header_location: HeaderLocation,
     collection_job: CollectionJob,
-    after_datetime: datetime,
+    discovery_mode: str,
+    after_datetime: datetime | None,
 ) -> None:
     """
     Writes the collection-level start status before discovery begins.
     """
+    status_detail = 'full historical backfill'
+    if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
+        status_detail = f'store-time-after {after_datetime.isoformat()}'
     status_update = CollectionProcessingStatusUpdate(
         processing_status_main=STATUS_DISCOVERY_IN_PROGRESS,
-        processing_status_detail=f'store-time-after {after_datetime.isoformat()}',
+        processing_status_detail=status_detail,
     )
     update_collection_processing_status(worksheet, header_location, collection_job.row_number, status_update)
 
@@ -475,15 +497,23 @@ def process_collection_job(
     state = load_collection_state(storage_root, collection_job.collection_id)
     checkpoint_store_time_max = state.get('enumeration_checkpoint_store_time_max')
     checkpoint_value = checkpoint_store_time_max if isinstance(checkpoint_store_time_max, str) else None
-    after_datetime = compute_store_time_after_datetime(checkpoint_value, datetime.now(UTC))
+    discovery_mode, after_datetime = determine_collection_discovery_mode(checkpoint_value, datetime.now(UTC))
 
-    log.info(
-        'Processing collection %s with store-time-after boundary %s.',
-        collection_job.collection_id,
-        after_datetime.isoformat(),
-    )
+    if after_datetime is None:
+        log.info(
+            'Processing collection %s in %s mode with no store-time-after boundary.',
+            collection_job.collection_id,
+            discovery_mode,
+        )
+    else:
+        log.info(
+            'Processing collection %s in %s mode with store-time-after boundary %s.',
+            collection_job.collection_id,
+            discovery_mode,
+            after_datetime.isoformat(),
+        )
 
-    write_collection_start_status(worksheet, header_location, collection_job, after_datetime)
+    write_collection_start_status(worksheet, header_location, collection_job, discovery_mode, after_datetime)
 
     discovery_result = fetch_collection_discovery(
         client=client,
