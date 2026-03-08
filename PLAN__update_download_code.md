@@ -6,229 +6,181 @@ Reviewed inputs:
 
 - `AGENTS.md`
 - `PLAN__simplified_warc_backup_script.md`
-- `logs/warc_tracker_script.log`
-- `warc_downloads/collections/22900/state.json`
-- current sequential download/discovery code in `lib/orchestration.py`, `lib/local_state.py`, `lib/downloader.py`, and `lib/wasapi_discovery.py`
+- current code in `main.py`, `lib/orchestration.py`, `lib/local_state.py`, and `lib/downloader.py`
+- current tests in `tests/test_downloader.py` and `tests/test_orchestration.py`
 
-## Observed facts
+## Current-state assessment
 
-- The WASAPI discovery log for collection `22900` shows `24` discovered file records on page `1`.
-- The sequential orchestration built `24` planned download paths and `24` planned downloads.
-- The same log shows the run continued for roughly `21` minutes after discovery.
-- The run summary at the end says:
-  - `24` pending candidates
-  - `24` planned downloads
-  - `16` download successes
-  - `8` download failures
-  - `16` fixity successes
-- The current `state.json` for collection `22900` contains `24` file entries total:
-  - `16` downloaded
-  - `8` failed
-- The failure pattern in the log is dominated by upstream `502 Bad Gateway` responses coming from redirected `archive.org` URLs.
+This plan was written against an earlier version of the download flow. Some suggestions are still useful, but others have been partly or fully superseded by later code changes.
 
-## Primary hypothesis: what most likely went wrong
+### What has changed since the earlier draft
 
-The most likely explanation for the earlier discrepancy of "`24` discovered" versus "only `9` entries in `state.json`" is that the file was inspected while the long sequential run was still in progress, not after it had finished.
+- The production flow still runs sequentially, but it now includes spreadsheet start/final reporting from `lib/orchestration.py`.
+- The production flow now includes reconciliation-driven retry planning via `build_reconciliation_retry_downloads()` and `merge_planned_downloads()`.
+- The local manifest is updated durably after each attempted download and after each successful download's fixity work.
+- The downloader still performs exactly one streaming attempt per file and deletes stale `*.partial` files before the attempt.
 
-Why this is the strongest explanation:
+### What remains true from the earlier draft
 
-- The code writes `state.json` incrementally after each file attempt.
-- The log contains repeated `Saved collection 22900 state after processing ...` messages throughout the run.
-- The run started processing downloads at `13:19:58` and did not finish until `13:40:41`.
-- Several of the later successful entries in `state.json` have timestamps around `18:39` and `18:40` UTC, which correspond to the end of the run.
-- The current `state.json` now reflects all `24` discovered files, which matches the completed log summary.
+- `process_collection_job()` still advances `enumeration_checkpoint_store_time_max` immediately after successful discovery and before download attempts begin.
+- Discovered files are still not written to `state.json` until each individual download attempt occurs.
+- If a planned destination WARC already exists, `run_planned_downloads()` logs and skips it without ensuring that the manifest and fixity metadata are brought into alignment.
+- Final logging still mixes several concepts together; it reports `pending candidates`, `planned downloads`, `download successes`, `download failures`, and `skipped existing files`, but it does not durably persist a discovery/planning summary.
+- `download_to_path()` still has no bounded in-run retry behavior for transient upstream `5xx` or transport errors.
 
-So the earlier "9 entries" snapshot was probably a mid-run snapshot rather than evidence that the code permanently dropped 15 records.
+## Recommendation review
 
-## Secondary hypotheses: real weaknesses in the current code
+### Recommendation 1: persist discovered/planned files to state before downloads begin
 
-Even though the specific mismatch was probably caused by checking the state file mid-run, the current implementation still has some real weaknesses that can make this confusing or operationally risky.
+Status: **still applicable and still high-value**.
 
-### 1. Checkpoint advances before download work finishes
+Why it still matters:
 
-Current behavior:
+- The current manifest only becomes complete as the sequential loop progresses.
+- Mid-run inspection still cannot distinguish between `not discovered yet` and `discovered but not attempted yet`.
+- Crash recovery reasoning would be clearer if discovery/planning state were durably recorded before the first download begins.
 
-- `process_collection_job()` saves `enumeration_checkpoint_store_time_max` immediately after discovery succeeds.
-- This happens before any of the `24` downloads are attempted.
+Suggested revision:
 
-Why this is risky:
-
-- If the process crashes after discovery but before most downloads are attempted, the checkpoint has already advanced.
-- The overlap-window design should eventually recover many missed files, but recovery becomes dependent on the overlap logic instead of the state file giving a complete picture of what discovery found in this run.
-- During a first-run full backfill, this is especially awkward because the state file can temporarily show a fresh checkpoint but only partial file-manifest coverage.
-
-### 2. Discovered-but-not-yet-attempted files are not durably recorded up front
-
-Current behavior:
-
-- The manifest only gets a file entry after a download attempt occurs.
-- A discovered record that has not yet been attempted has no representation in `state.json`.
-
-Why this matters:
-
-- Mid-run inspection makes it look as if discovery found fewer files than it actually did.
-- If the process stops partway through, the state file does not distinguish between:
-  - not discovered
-  - discovered but not yet attempted
-  - attempted and failed
-- This makes debugging and restart reasoning harder.
-
-### 3. Logging shows detailed per-file planning, but state does not expose discovery/planning progress
-
-Current behavior:
-
-- The log clearly shows all `24` planned files.
-- The persisted state does not have a discovery-run summary such as `discovered_count`, `planned_download_count`, or `remaining_count`.
-
-Why this matters:
-
-- Operators comparing the log against `state.json` can infer a false persistence bug.
-- The system lacks a durable bridge between discovery and execution.
-
-### 4. Upstream download failures are redirected `502`s and may need stronger retry handling
-
-Current behavior:
-
-- Many failures are `502 Bad Gateway` responses against redirected `archive.org` hosts.
-- `download_to_path()` performs one streaming attempt and returns failure immediately.
-
-Why this matters:
-
-- Some failures are probably transient and recoverable within the same run.
-- The current design pushes all retry behavior to later reruns instead of applying bounded in-run retries for obvious transient server failures.
-
-## Recommended code changes
-
-## Recommendation 1: persist discovered/planned files to state before downloads begin
-
-Add a planning-state write immediately after discovery and planned-download construction.
-
-Suggested behavior:
-
-- For every discovered record with a usable filename, create or update a manifest entry before download begins.
-- Record a lightweight status such as:
-  - `status: discovered`
-  - or `status: pending_download`
-- Also record stable metadata when available:
+- After discovery and planned-download construction, create or update manifest entries for every planned filename before calling `run_planned_downloads()`.
+- Record stable metadata when available:
   - `source_url`
   - `warc_path`
-  - optional `discovered_at`
   - optional `store_time`
+  - optional planning/discovery timestamp
+- Use an explicit pre-download state such as `pending_download` rather than overloading `failed` or `downloaded`.
 
-Expected benefit:
+### Recommendation 2: persist collection-level run metadata for discovery and planning
 
-- `state.json` will reflect all discovered files early in the run.
-- A mid-run inspection will no longer look like silent data loss.
-- Crash recovery and debugging become much easier.
+Status: **still applicable**, but should stay lightweight.
 
-## Recommendation 2: persist collection-level run metadata for discovery and planning
+Why it still matters:
 
-Add a small top-level collection-run summary block in `state.json`.
+- The current code logs discovery/planning counts but does not save them durably.
+- A small top-level summary block would make state inspection much easier during long runs and after interruptions.
 
 Suggested fields:
 
 - `last_discovery_completed_at`
 - `last_discovery_record_count`
-- `last_planned_download_count`
+- `last_discovery_planned_download_count`
+- `last_download_loop_attempted_count`
 - `last_run_status`
 
-Optional first-pass fields only:
+Keep this small and operational; do not turn `state.json` into a second event log.
 
-- `last_run_status: discovery-complete`
-- `last_run_status: downloads-in-progress`
-- `last_run_status: downloads-complete`
+### Recommendation 3: move checkpoint persistence until after planning-state persistence
 
-Expected benefit:
+Status: **still applicable**.
 
-- Makes it immediately clear that discovery found `24` files even if only part of the download loop has finished.
-- Provides durable operational context without relying on the log file alone.
+This is the key ordering improvement if recommendation 1 is implemented.
 
-## Recommendation 3: consider moving checkpoint persistence until after planning-state persistence
-
-At minimum, change the order so that:
+Preferred order:
 
 1. discovery succeeds
-2. discovered/planned files are durably written to `state.json`
+2. planned/discovered manifest state is written durably
 3. checkpoint is written
 4. downloads begin
 
-Why this ordering is better:
+Reasoning:
 
-- If a crash happens after checkpoint advancement, the state file will still contain the full discovered set for that run.
-- This preserves the current design decision that download failures do not block checkpoint advancement, while avoiding the weaker state shape that exists today.
+- The current design choice that download failures do not block checkpoint advancement can still stand.
+- But if checkpoint advancement remains earlier than any durable planning-state write, the state file still gives a weaker picture after an interruption.
 
-## Recommendation 4: add bounded retries for transient `5xx` download failures
+### Recommendation 4: add bounded retries for transient `5xx` download failures
 
-Enhance `download_to_path()` or a small orchestrator wrapper around it to retry transient download failures.
+Status: **still applicable and probably the most useful download-layer change**.
 
-Suggested first slice:
+Current code facts:
 
-- retry a small number of times for `502`, `503`, `504`, and connection-reset style transport errors
-- use short exponential backoff
-- keep deleting stale `.partial` files before each retry
-- include retry-attempt logging with filename and URL
+- `download_to_path()` performs a single `client.stream('GET', source_url)` attempt.
+- It removes stale partials before the attempt and cleans up partials after failure.
+- It returns a structured `DownloadResult`, which makes it straightforward to wrap with retry logic.
 
-Expected benefit:
+Recommended first slice:
 
-- Reduces the number of failures caused by temporary upstream instability.
-- Especially useful because the failures observed here appear to be transient redirected-host failures, not permanent `404`-style misses.
+- Retry a small fixed number of times for clearly transient failures such as `502`, `503`, `504`, and selected `httpx` transport exceptions.
+- Keep retry logic outside the lowest-level byte-stream loop if that keeps the code simpler.
+- Log retry count, filename, and source URL clearly.
+- Continue deleting stale partial files before each attempt.
 
-## Recommendation 5: make "skipped because file exists" update the manifest if needed
+### Recommendation 5: make `destination already exists` reconcile manifest/fixity state
 
-Current behavior:
+Status: **still applicable and now more important**.
 
-- If a destination WARC already exists, the code logs and `continue`s.
-- It does not ensure the manifest entry is updated for that file in the same branch.
+Why it matters more now:
 
-Suggested change:
+- The codebase has added reconciliation-driven retry planning, but the `destination_path.exists()` branch still just logs and skips.
+- That means an on-disk WARC can continue to coexist with missing or stale manifest/fixity metadata.
+- This weakens the local-state model that the broader project plan treats as the main durable operational record.
 
-- When skipping because the WARC already exists, ensure the manifest entry is present and consistent.
-- If fixity sidecars already exist, mark them too.
-- If fixity sidecars do not exist, either queue fixity creation or mark the file as needing fixity.
+Recommended behavior:
 
-Expected benefit:
+- When a WARC already exists, ensure the manifest entry exists and points at the correct `warc_path` and `source_url`.
+- If fixity sidecars exist, record them.
+- If fixity sidecars do not exist, either generate them immediately or mark the manifest entry as needing fixity reconciliation.
 
-- Keeps filesystem truth and manifest truth aligned.
-- Prevents under-reporting in `state.json` for reruns.
+### Recommendation 6: improve final reporting terminology
 
-## Recommendation 6: improve final reporting terminology
+Status: **still applicable, but wording should be updated to match the current code**.
 
-The current final report counts only attempted downloads in some places, while the state file is becoming the broader source of truth.
+The current code already distinguishes some counts in logging, so the need is no longer "add all reporting" but rather "make the count vocabulary more explicit and consistent across logs, state, and future spreadsheet reporting."
 
-Suggested changes:
- 
-- distinguish clearly between:
-  - discovered files
-  - planned downloads
-  - attempted downloads
-  - successful downloads
-  - failed downloads
-- include these counts in logging and, if useful, future spreadsheet reporting
+Recommended count vocabulary:
 
-Expected benefit:
+- `discovered_record_count`
+- `planned_download_count`
+- `attempted_download_count`
+- `successful_download_count`
+- `failed_download_count`
+- `skipped_existing_count`
+- `fixity_success_count`
+- `fixity_failure_count`
 
-- Prevents confusion like the one seen here.
-- Makes the distinction between discovery and execution explicit.
+## Additional observations not emphasized enough in the earlier draft
 
-## Minimum recommended implementation slice
+### Spreadsheet progress reporting is no longer entirely missing
 
-If you want the smallest high-value change first, implement these in order:
+The earlier draft treated spreadsheet updates as absent. That is now outdated.
 
-1. Write manifest entries for all discovered/planned files before downloads start.
-2. Save a small top-level discovery/planning summary to `state.json`.
-3. Move checkpoint persistence until after that state write.
-4. Add bounded retries for transient `5xx` download failures.
+Current state:
+
+- collection start status is written before discovery
+- final collection reporting is written at the end
+- mid-download progress updates are still not implemented
+
+So future work should describe this accurately as **expanding** spreadsheet reporting, not **introducing it from zero**.
+
+### Reconciliation retries reduce the urgency of some older concerns, but do not eliminate them
+
+The newer reconciliation logic helps recover from some mismatch cases by retrying manifest-recorded files whose `warc_path` is missing on disk.
+
+However, it does **not** solve the earlier-planning visibility gap, because files that were discovered but never written to the manifest still do not participate in that reconciliation path.
+
+## Revised priority order
+
+If you want the smallest high-value implementation sequence now, do this:
+
+1. Persist planned/discovered manifest entries before downloads begin.
+2. Write a compact top-level discovery/planning summary into `state.json`.
+3. Move checkpoint persistence to after that durable planning-state save.
+4. Reconcile the `destination already exists` branch so manifest and fixity state stay aligned.
+5. Add bounded retries for transient download failures.
+6. Tighten logging/reporting terminology so discovery, planning, attempt, skip, download, and fixity counts are explicit.
 
 ## Bottom line
 
-The evidence does not currently support a bug where `15` discovered files were permanently omitted from `state.json`.
+The older plan's central insight is still valid: the biggest remaining weakness is the gap between discovery/planning and durable local-state visibility.
 
-Instead, the most likely cause is:
+But the plan needed revision because the codebase has moved forward:
 
-- the state file was examined while the sequential download run was still in progress
-- combined with a real design limitation: discovered files are not written to `state.json` until each individual download attempt happens
+- spreadsheet start/final reporting now exists
+- reconciliation-driven retry planning now exists
+- incremental per-file manifest persistence now exists
 
-So the core improvement is not "fix missing persistence after download" but rather:
+So the remaining work is narrower than the earlier draft implied:
 
-- persist discovery/planning state earlier and more explicitly
-- then make transient download failures more resilient
+- persist planning state earlier
+- align `already exists` handling with manifest/fixity truth
+- add bounded transient-failure retries
+- make durable and logged counts easier to interpret

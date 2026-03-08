@@ -1,5 +1,7 @@
 - review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
 - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them.
-- update `warc_tracker_script/PLAN__simplified_warc_backup_script.md` with what has been completed.
+- review `warc_tracker_script/PLAN__update_download_code.md` for _possible_ download improvements.
+- the download code has changed since `warc_tracker_script/PLAN__update_download_code.md` was written.
+- assess the suggestions in `warc_tracker_script/PLAN__update_download_code.md` to see if they're still applicable and useful.
+- revise `warc_tracker_script/PLAN__update_download_code.md` with additions, edits, and deletions as appropriate.
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
