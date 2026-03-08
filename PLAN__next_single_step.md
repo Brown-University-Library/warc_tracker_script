@@ -1,178 +1,210 @@
-# Next Single Step: Simple Option-1 First-Run Backfill Mode
-
-## Context for Future Agents
-
-**Code-directives**: review `warc_tracker_script/AGENTS.md` before editing code.
-
-**Plan references**:
-
-- `warc_tracker_script/PLAN__handling_historical_warcs.md`
-- `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
-
-**Focus of this step**: implement only **Option 1** from `PLAN__handling_historical_warcs.md`.
-
-The intended behavior is simple:
-
-- if a collection has no local checkpoint yet, run in **download-everything / full historical backfill** mode
-- if a collection already has a checkpoint, run in normal **30-day overlap-window incremental** mode
-
-This should be implemented with the smallest clear change in the existing sequential flow.
-
----
-## Goal of This Step
-
-Add one simple mode switch to the current orchestration:
-
-1. read the collection's local `state.json`
-2. check whether `enumeration_checkpoint_store_time_max` exists
-3. if no checkpoint exists, do a full historical WASAPI enumeration for that collection
-4. if a checkpoint exists, keep the current 30-day overlap-window behavior
-5. after successful enumeration, save the max observed `store-time` as the checkpoint
-
-That is the whole feature for this step.
-
----
-## Why This Is the Right Next Step
-
-1. **It directly matches Option 1**
-   - first run does a full backfill
-   - later runs stay incremental
-
-2. **It is simple**
-   - one checkpoint-based decision
-   - no new workflow mode
-   - no added operator action
-
-3. **It matches the master plan**
-   - the main plan already says first-run discovery behavior should be full historical backfill when no checkpoint exists
-
-4. **It fits the existing code shape**
-   - `main.py` stays thin
-   - `lib/orchestration.py` remains the main production flow
-
----
-## Specific Implementation Plan
-
-### 1. Use the checkpoint as the mode switch
-
-In `lib/orchestration.py`, keep the current per-collection flow, but make the mode explicit:
-
-- load local state
-- read `enumeration_checkpoint_store_time_max`
-- if it is missing or `null`, treat the collection as **first run / full backfill**
-- if it is present, treat the collection as **incremental / overlap-window run**
-
-No more complex signal is needed for this step.
-
-### 2. Compute the WASAPI boundary differently for the two modes
-
-For **first run**:
-
-- do not use `now - 30 days`
-- instead, perform discovery with no effective historical cutoff, or with the simplest deliberately early cutoff already supported by the codebase
-
-For **later runs**:
-
-- keep the current behavior of using the checkpoint minus 30 days
-
-The key point is:
-
-- **no checkpoint = backfill everything**
-- **checkpoint exists = normal recent overlap-window logic**
-
-### 3. Keep downloading logic simple
-
-Do not redesign download decision-making in this step.
-
-For the Option-1 feature, the important behavior is:
-
-- historical records become visible during first-run discovery
-- the existing sequential flow then downloads files that are not already present locally
-
-That is enough for this slice.
-
-### 4. Save the checkpoint only after successful enumeration
-
-Keep the existing checkpoint rule from the main plan:
-
-- only write `enumeration_checkpoint_store_time_max` after WASAPI paging completes successfully
-- write the max observed `store-time`
-
-This ensures that once a collection finishes its first successful historical enumeration, later runs can switch to the normal overlap-window mode.
-
-### 5. Log which mode was used
-
-Add or adjust logging so it is obvious whether a collection ran in:
-
-- `full-backfill-first-run` mode
-- `incremental-overlap-window` mode
-
-This will make behavior easy to verify during early production runs.
-
----
-## Likely Code Touch Points
-
-- `warc_tracker_script/lib/wasapi_discovery.py`
-  - only if needed to support a no-cutoff or clearly early-cutoff discovery path
-- `warc_tracker_script/lib/orchestration.py`
-  - make the checkpoint-based mode decision explicit in the production flow
-- `warc_tracker_script/tests/test_wasapi_discovery.py`
-  - verify boundary computation behavior
-- `warc_tracker_script/tests/test_orchestration.py`
-  - verify first-run versus later-run orchestration behavior
-
-Keep `warc_tracker_script/main.py` thin unless a tiny orchestration call adjustment is truly required.
-
----
-## Minimum Test Coverage
-
-Add focused `unittest` coverage for:
-
-- no checkpoint => first-run full backfill behavior
-- checkpoint present => 30-day overlap-window behavior
-- successful first-run enumeration writes the checkpoint
-- later runs continue using the checkpointed overlap-window path
-
-The tests do not need to cover spreadsheet updates or Trio behavior for this step.
-
----
-## Out of Scope for This Step
-
-- spreadsheet write/update behavior
-- Trio concurrency
-- lock/cron wrapper hardening
-- more advanced local file verification logic
-- any new operator-facing bootstrap mode
-
----
-## Success Criteria
-
-- [ ] a collection with no `enumeration_checkpoint_store_time_max` is treated as first-run full backfill
-- [ ] a collection with a checkpoint uses the existing 30-day overlap-window logic
-- [ ] the checkpoint is written after successful historical enumeration
-- [ ] the current sequential production flow remains the main execution path
-- [ ] focused `unittest` coverage exists for first-run versus checkpointed behavior
-
----
-## Likely Follow-Up After This Step
-
-1. verify the feature on a small set of real collections
-2. implement spreadsheet reporting from the sequential flow
-3. later move toward the planned Trio architecture
-
----
-## Handoff Notes
-
-If you pick this up in a new session, re-read:
-
-- `warc_tracker_script/AGENTS.md`
-- `warc_tracker_script/PLAN__handling_historical_warcs.md`
-- `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
-- `warc_tracker_script/PLAN__next_single_step.md`
-
-Quick mental model:
-
-- this step is only about the **simple checkpoint check**
-- no checkpoint means **backfill everything**
-- checkpoint present means **use the normal 30-day overlap window**
-- keep the implementation small and inside the existing sequential orchestration
+# Next Single Step: Filesystem-Reconciliation Retry Guarantee
+ 
+ ## Context for Future Agents
+ 
+ **Code-directives**: review `warc_tracker_script/AGENTS.md` before editing code.
+ 
+ **Plan references**:
+ 
+ - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
+ - `warc_tracker_script/PLAN__suggest_retry_guarantees.md`
+ 
+ **Focus of this step**: implement the chosen **filesystem-reconciliation** approach so future runs retry failed downloads and also recover any files that are missing on disk but still represented in `state.json`.
+ 
+ The intended behavior is:
+ 
+ - load a collection's `state.json`
+ - review all manifest entries under `files`
+ - compare each entry's expected `warc_path` against the filesystem
+ - if a manifest entry has a usable `source_url` and its WARC file is missing on disk, queue it for download
+ - merge those reconciliation-driven retry candidates with normal WASAPI discovery candidates
+ - deduplicate by filename before the existing sequential download loop runs
+ 
+ This should be implemented with the smallest clear change in the existing sequential orchestration.
+ 
+ ---
+ ## Goal of This Step
+ 
+ Add one reconciliation-based planning step to the current flow so the downloader no longer depends only on fresh WASAPI rediscovery to retry known missing files.
+ 
+ Specifically:
+ 
+ 1. load the collection's local `state.json`
+ 2. inspect all manifest entries in `state['files']`
+ 3. identify entries that have both:
+    - a usable `source_url`
+    - a usable `warc_path` whose file is currently absent on disk
+ 4. convert those entries into planned download candidates
+ 5. merge them with discovery-based planned downloads
+ 6. deduplicate by filename
+ 7. let the existing sequential download/fixity loop process the merged set
+ 
+ That is the whole feature for this step.
+ 
+ ---
+ ## Why This Is the Right Next Step
+ 
+ 1. **It matches the user's chosen approach**
+    - the selected plan is Option 2 from `PLAN__suggest_retry_guarantees.md`
+    - the core idea is filesystem reconciliation against manifest entries
+ 
+ 2. **It gives the desired guarantee**
+    - failed downloads will be retried if their local WARC is still absent
+    - missing files can be recovered even if they are no longer rediscovered by the current overlap window
+ 
+ 3. **It fits the master plan's source-of-truth model**
+    - the local filesystem remains the source of truth for actual WARC presence
+    - `state.json` remains the operational manifest and checkpoint store
+ 
+ 4. **It fits the current code shape**
+    - `main.py` stays thin
+    - `lib/orchestration.py` remains the place where candidate downloads are assembled
+    - `run_planned_downloads()` can remain mostly unchanged because it already uses filesystem existence checks
+ 
+ ---
+ ## Specific Implementation Plan
+ 
+ ### 1. Add a helper that builds reconciliation retry candidates from `state.json`
+ 
+ In `lib/orchestration.py`, add a helper that scans the loaded collection state and returns `PlannedDownload` items for manifest entries that should be retried.
+ 
+ The helper should:
+ 
+ - read `state.get('files')`
+ - ignore entries that are not dictionaries
+ - require a non-empty filename key
+ - require a usable `source_url`
+ - require a usable `warc_path`
+ - check whether `Path(warc_path).exists()`
+ - if the WARC exists, do not queue it
+ - if the WARC is missing, derive planned paths for that filename using `plan_collection_paths()` rather than trusting sidecar paths from state
+ - return a list of `PlannedDownload` objects
+ 
+ Important design choice:
+ 
+ - use the manifest entry only to discover that a file is missing and recover its `source_url`
+ - use `plan_collection_paths()` to rebuild the canonical local paths so the orchestration continues to rely on the current storage-layout rules
+ 
+ ### 2. Add a helper that merges and deduplicates planned downloads by filename
+ 
+ The current code already builds discovery-based `planned_downloads`.
+ 
+ Add a small helper that merges:
+ 
+ - reconciliation-based retry candidates from state
+ - discovery-based candidates from WASAPI
+ 
+ Deduplicate by filename.
+ 
+ Recommended merge rule for this step:
+ 
+ - prefer the discovery-based candidate when the same filename appears in both sources
+ - otherwise keep whichever single candidate exists
+ 
+ This keeps normal discovery authoritative when available, while still guaranteeing retries for missing files that are no longer rediscovered.
+ 
+ ### 3. Integrate reconciliation before `run_planned_downloads()`
+ 
+ In `process_collection_job()`:
+ 
+ - keep the existing discovery flow
+ - keep the existing checkpoint handling
+ - keep the existing discovery-based planning
+ - build reconciliation candidates from the loaded state
+ - merge reconciliation candidates with discovery candidates
+ - pass the merged list to `run_planned_downloads()`
+ 
+ Keep the current sequential flow intact. The main change is to how `planned_downloads` is assembled.
+ 
+ ### 4. Keep the existing filesystem-based skip behavior
+ 
+ Do not redesign `run_planned_downloads()` in this step beyond what is strictly needed.
+ 
+ The current behavior is already aligned with the chosen approach:
+ 
+ - the downloader checks `destination_path.exists()` on disk
+ - if the WARC exists locally, it skips download
+ - if the WARC is absent, it attempts the download
+ 
+ That means the new reconciliation candidates can flow through the existing loop without needing a separate retry execution path.
+ 
+ ### 5. Add logging that distinguishes reconciliation candidates from discovery candidates
+ 
+ Add or adjust logging so operators can see:
+ 
+ - how many candidates came from state/disk reconciliation
+ - how many came from fresh WASAPI discovery
+ - how many remained after deduplication
+ 
+ This is important because the new guarantee depends on more than just overlap-window rediscovery, and the logs should make that visible.
+ 
+ ---
+ ## Likely Code Touch Points
+ 
+ - `warc_tracker_script/lib/orchestration.py`
+   - add a helper to build reconciliation-based retry candidates from manifest entries
+   - add a helper to merge and deduplicate planned downloads
+   - update `process_collection_job()` to use the merged set
+ - `warc_tracker_script/tests/test_orchestration.py`
+   - add focused tests for reconciliation candidate creation and merged planning behavior
+ - `warc_tracker_script/tests/test_collection_state.py`
+   - only if existing state-focused tests need to be expanded for malformed or partial manifest-entry cases
+ 
+ Keep `main.py`, `downloader.py`, and `local_state.py` unchanged unless a very small supporting edit is clearly needed.
+ 
+ ---
+ ## Minimum Test Coverage
+ 
+ Add focused `unittest` coverage for:
+ 
+ - manifest entry with missing local WARC and usable `source_url` => queued for retry
+ - manifest entry with existing local WARC => not queued for retry
+ - malformed manifest entry without usable `source_url` or `warc_path` => skipped safely
+ - filename present in both reconciliation candidates and discovery candidates => deduplicated to one planned download
+ - reconciliation-only missing file is passed into the existing sequential download flow
+ 
+ The tests do not need to cover spreadsheet updates or Trio behavior for this step.
+ 
+ ---
+ ## Out of Scope for This Step
+ 
+ - retry backoff or retry throttling based on `last_attempt_at`
+ - verification of local file size against remote metadata
+ - validation or regeneration of missing fixity sidecars for otherwise present WARC files
+ - spreadsheet write/update behavior
+ - Trio concurrency
+ - lock/cron wrapper hardening
+ 
+ ---
+ ## Success Criteria
+ 
+ - [ ] a manifest entry with a missing local WARC and usable `source_url` is retried in a future run even if WASAPI does not rediscover it
+ - [ ] a manifest entry whose local WARC already exists is not redundantly re-downloaded
+ - [ ] discovery-based planned downloads and reconciliation-based retry candidates are merged and deduplicated by filename
+ - [ ] the current sequential production flow remains the main execution path
+ - [ ] focused `unittest` coverage exists for reconciliation-driven retry behavior
+ 
+ ---
+ ## Likely Follow-Up After This Step
+ 
+ 1. decide whether missing fixity sidecars for present WARCs should also be reconciled automatically
+ 2. add optional retry throttling for repeatedly failing URLs
+ 3. improve spreadsheet reporting so logs and sheet status can distinguish discovery-driven downloads from reconciliation-driven retries
+ 
+ ---
+ ## Handoff Notes
+ 
+ If you pick this up in a new session, re-read:
+ 
+ - `warc_tracker_script/AGENTS.md`
+ - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
+ - `warc_tracker_script/PLAN__suggest_retry_guarantees.md`
+ - `warc_tracker_script/PLAN__next_single_step.md`
+ 
+ Quick mental model:
+ 
+ - this step is about **reconciling `state.json` against the filesystem**
+ - `state.json` tells you what files the collection thinks it knows about
+ - the filesystem tells you whether a WARC is actually present
+ - if state knows about a file and disk does not have it, queue it for download
+ - merge that queue with normal WASAPI discovery results and let the current sequential download loop handle the rest

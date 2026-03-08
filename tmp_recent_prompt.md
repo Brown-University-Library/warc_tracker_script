@@ -1,9 +1,5 @@
 - review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
 - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- review the logging for a recent run at `logs/warc_tracker_script.log` 
-- the log entry `[wasapi_discovery-fetch_collection_discovery()::236] Collection 22900 page 1 full payload:` ... indicates there were 24 files, but the `warc_downloads/collections/22900/state.json` file only has info on 9.
-- please do the following:
-  - hypothesize what went wrong
-  - suggest any code-changes that should be made
-  - save these to `warc_tracker_script/PLAN__update_download_code.md` 
-- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
+- review `warc_tracker_script/PLAN__suggest_retry_guarantees.md` which now contains the approach I want to implement, to guarantee failures are retried (as well as any missing files).
+- review any other code you need to to create an implementation-plan and save it to `warc_tracker_script/PLAN__next_single_step.md`, overwriting all previous content.
+- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting all previous content.
