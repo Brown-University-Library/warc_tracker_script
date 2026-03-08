@@ -198,6 +198,89 @@ def build_planned_downloads(
     return result
 
 
+def build_reconciliation_retry_downloads(
+    storage_root: Path,
+    collection_id: int,
+    state: dict[str, object],
+) -> list[PlannedDownload]:
+    """
+    Builds retry candidates from manifest entries whose expected WARC file is absent on disk.
+    Called by: process_collection_job()
+    """
+    result: list[PlannedDownload] = []
+    files_value = state.get('files')
+    files_state = files_value if isinstance(files_value, dict) else {}
+    for filename_key, entry_value in files_state.items():
+        if not isinstance(filename_key, str) or not filename_key.strip():
+            continue
+        if not isinstance(entry_value, dict):
+            continue
+
+        source_url_value = entry_value.get('source_url')
+        warc_path_value = entry_value.get('warc_path')
+        if not isinstance(source_url_value, str) or not source_url_value.strip():
+            continue
+        if not isinstance(warc_path_value, str) or not warc_path_value.strip():
+            continue
+        if Path(warc_path_value).exists():
+            continue
+
+        try:
+            planned_paths = plan_collection_paths(storage_root, collection_id, filename_key)
+        except StorageLayoutError:
+            log.exception(
+                'Collection %s manifest filename could not be mapped to the local storage layout: %s',
+                collection_id,
+                filename_key,
+            )
+            continue
+
+        result.append(
+            PlannedDownload(
+                filename=filename_key,
+                source_url=source_url_value.strip(),
+                planned_paths=planned_paths,
+            )
+        )
+    return result
+
+
+def merge_planned_downloads(
+    reconciliation_downloads: list[PlannedDownload],
+    discovery_downloads: list[PlannedDownload],
+) -> list[PlannedDownload]:
+    """
+    Merges reconciliation and discovery planned downloads, preferring discovery when filenames overlap.
+    Called by: process_collection_job()
+    """
+    merged_by_filename: dict[str, PlannedDownload] = {}
+    for planned_download in reconciliation_downloads:
+        merged_by_filename[planned_download.filename] = planned_download
+    for planned_download in discovery_downloads:
+        merged_by_filename[planned_download.filename] = planned_download
+    result = list(merged_by_filename.values())
+    return result
+
+
+def log_planned_download_candidate_counts(
+    collection_id: int,
+    reconciliation_count: int,
+    discovery_count: int,
+    merged_count: int,
+) -> None:
+    """
+    Logs the counts of reconciliation, discovery, and merged planned download candidates.
+    Called by: process_collection_job()
+    """
+    log.info(
+        'Collection %s has %s reconciliation candidates, %s discovery candidates, and %s merged planned downloads.',
+        collection_id,
+        reconciliation_count,
+        discovery_count,
+        merged_count,
+    )
+
+
 def log_planned_download_paths(collection_id: int, planned_paths: list[PlannedCollectionPaths]) -> None:
     """
     Logs the planned local WARC and fixity destinations for discovered records.
@@ -540,7 +623,26 @@ def process_collection_job(
     pending_download_count = count_pending_download_candidates(discovery_result.records, state)
     planned_paths = build_planned_download_paths(storage_root, collection_job.collection_id, discovery_result.records)
     log_planned_download_paths(collection_job.collection_id, planned_paths)
-    planned_downloads = build_planned_downloads(storage_root, collection_job.collection_id, discovery_result.records)
+    discovery_planned_downloads = build_planned_downloads(
+        storage_root,
+        collection_job.collection_id,
+        discovery_result.records,
+    )
+    reconciliation_planned_downloads = build_reconciliation_retry_downloads(
+        storage_root,
+        collection_job.collection_id,
+        state,
+    )
+    planned_downloads = merge_planned_downloads(
+        reconciliation_planned_downloads,
+        discovery_planned_downloads,
+    )
+    log_planned_download_candidate_counts(
+        collection_job.collection_id,
+        len(reconciliation_planned_downloads),
+        len(discovery_planned_downloads),
+        len(planned_downloads),
+    )
     download_results, fixity_results = run_planned_downloads(
         client,
         storage_root,

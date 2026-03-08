@@ -35,7 +35,9 @@ Completed so far:
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
 - a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, switches between first-run full historical backfill and checkpointed 30-day overlap-window discovery based on the local enumeration checkpoint, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, downloads WARC files sequentially to planned destinations, generates fixity sidecars after successful downloads, durably records per-file download/fixity outcomes in `state.json`, and logs per-collection download/fixity summaries
 - Archive-It credential loading and storage-root resolution exist in `lib/orchestration.py`
+- filesystem-reconciliation retry planning exists in `lib/orchestration.py`; it scans `state.json` manifest entries, queues retry candidates for files whose recorded `warc_path` is missing on disk and whose `source_url` remains usable, merges those candidates with fresh WASAPI discovery-based planned downloads, deduplicates by filename while preferring discovery candidates, and feeds the merged set into the existing sequential download/fixity loop
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, fixity helpers, production orchestration helpers including first-run versus checkpointed discovery behavior, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
+- additional focused `unittest` coverage exists for reconciliation-driven retry planning, malformed manifest-entry skipping, filename-level merge/dedup behavior, and reconciliation-only download candidates flowing through the current sequential production orchestration
 
 Not yet implemented in the production backup flow:
 
@@ -588,16 +590,17 @@ Keep this minimal and practical.
 7. [x] Implement downloader with temp-file then atomic rename.
 8. [x] Implement SHA-256 sidecar writing.
 9. [x] Implement durable local manifest updates for download and fixity outcomes.
-10. Implement spreadsheet write/update behavior.
+10. [x] Add filesystem-reconciliation retry planning so missing local WARCs recorded in `state.json` are retried even when WASAPI does not rediscover them.
+11. Implement spreadsheet write/update behavior.
    - first slice: validate required reporting columns up front and write collection-level start/final status updates from the existing sequential flow
    - later slice: add mid-download progress reporting and move sheet writes behind the dedicated sheet-updater task
-11. Implement the `Trio` flow:
+12. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
    - download worker 2
    - sheet updater
-12. Add lock and cron wrapper.
-13. Run on a small set of collections before scaling up.
+13. Add lock and cron wrapper.
+14. Run on a small set of collections before scaling up.
 
 ---
 

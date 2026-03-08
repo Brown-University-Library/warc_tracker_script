@@ -1,5 +1,5 @@
 - review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
 - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- review `warc_tracker_script/PLAN__suggest_retry_guarantees.md` which now contains the approach I want to implement, to guarantee failures are retried (as well as any missing files).
-- review any other code you need to to create an implementation-plan and save it to `warc_tracker_script/PLAN__next_single_step.md`, overwriting all previous content.
-- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting all previous content.
+- review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them.
+- update `warc_tracker_script/PLAN__simplified_warc_backup_script.md` with what has been completed.
+- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.

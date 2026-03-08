@@ -17,15 +17,18 @@ from lib.orchestration import (
     DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW,
     STATUS_COMPLETED_WITH_SOME_FILE_FAILURES,
     STATUS_DOWNLOADED_WITHOUT_ERRORS,
+    PlannedDownload,
     build_collection_failure_report,
     build_collection_final_report,
     build_planned_download_paths,
     build_planned_downloads,
+    build_reconciliation_retry_downloads,
     count_pending_download_candidates,
     determine_collection_discovery_mode,
     get_archive_it_credentials,
     get_downloaded_storage_root,
     get_record_source_url,
+    merge_planned_downloads,
     process_collection_job,
 )
 
@@ -182,6 +185,90 @@ class TestDownloadPlanningHelpers(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].filename, 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz')
         self.assertEqual(result[0].source_url, 'https://example.org/alpha.warc.gz')
+
+    def test_build_reconciliation_retry_downloads_includes_missing_local_warc(self):
+        """
+        Checks that a manifest entry with a missing local WARC and usable source URL becomes a retry candidate.
+        """
+        state = {
+            'files': {
+                'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
+                    'source_url': 'https://example.org/alpha.warc.gz',
+                    'warc_path': '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz',
+                }
+            }
+        }
+
+        result = build_reconciliation_retry_downloads(Path('/tmp/storage'), 123, state)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].filename, 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz')
+        self.assertEqual(result[0].source_url, 'https://example.org/alpha.warc.gz')
+        self.assertTrue(
+            str(result[0].planned_paths.warc_path).endswith(
+                '/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
+            )
+        )
+
+    def test_build_reconciliation_retry_downloads_skips_existing_local_warc(self):
+        """
+        Checks that a manifest entry is not queued when its WARC is already present on disk.
+        """
+        existing_warc = Path('/tmp/storage/collections/123/warcs/2026/03/existing-alpha.warc.gz')
+        state = {
+            'files': {
+                'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
+                    'source_url': 'https://example.org/alpha.warc.gz',
+                    'warc_path': str(existing_warc),
+                }
+            }
+        }
+
+        with patch('lib.orchestration.Path.exists', return_value=True):
+            result = build_reconciliation_retry_downloads(Path('/tmp/storage'), 123, state)
+
+        self.assertEqual(result, [])
+
+    def test_build_reconciliation_retry_downloads_skips_malformed_manifest_entries(self):
+        """
+        Checks that malformed manifest entries without usable source-url or warc-path values are skipped safely.
+        """
+        state = {
+            'files': {
+                'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
+                    'warc_path': '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz',
+                },
+                'ARCHIVEIT-123-20260306123556-00000-beta.warc.gz': {
+                    'source_url': 'https://example.org/beta.warc.gz',
+                },
+                'ARCHIVEIT-123-20260306123656-00000-gamma.warc.gz': 'not-a-dict',
+            }
+        }
+
+        result = build_reconciliation_retry_downloads(Path('/tmp/storage'), 123, state)
+
+        self.assertEqual(result, [])
+
+    def test_merge_planned_downloads_prefers_discovery_candidate_for_duplicate_filename(self):
+        """
+        Checks that discovery planning wins when the same filename appears in both candidate sources.
+        """
+        duplicate_filename = 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
+        reconciliation_candidate = PlannedDownload(
+            filename=duplicate_filename,
+            source_url='https://example.org/reconciliation-alpha.warc.gz',
+            planned_paths=build_planned_download_paths(Path('/tmp/storage'), 123, [{'filename': duplicate_filename}])[0],
+        )
+        discovery_candidate = PlannedDownload(
+            filename=duplicate_filename,
+            source_url='https://example.org/discovery-alpha.warc.gz',
+            planned_paths=build_planned_download_paths(Path('/tmp/storage'), 123, [{'filename': duplicate_filename}])[0],
+        )
+
+        result = merge_planned_downloads([reconciliation_candidate], [discovery_candidate])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].source_url, 'https://example.org/discovery-alpha.warc.gz')
 
 
 class TestProcessCollectionJob(TestCase):
@@ -524,6 +611,89 @@ class TestProcessCollectionJob(TestCase):
             'store-time-after 2026-01-30T12:00:00+00:00',
         )
         self.assertEqual(mock_save.call_args.args[2]['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
+
+    def test_reconciliation_only_missing_file_flows_into_sequential_downloads(self):
+        """
+        Checks that a reconciliation-only missing file is passed into the existing sequential download flow.
+        """
+        collection_job = CollectionJob(
+            collection_id=123,
+            repository='UA',
+            collection_url='https://example.com',
+            collection_name='Example',
+            row_number=7,
+        )
+        client = MagicMock(spec=httpx.Client)
+        worksheet = MagicMock()
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 0,
+                'processing_status_detail': 1,
+                'summary_status_last_wasapi_check': 2,
+                'summary_status_downloaded_warcs_count': 3,
+                'summary_status_downloaded_warcs_size': 4,
+                'summary_status_server_path': 5,
+            },
+        )
+        discovery_result = MagicMock()
+        discovery_result.records = []
+        discovery_result.request_records = [{'page': 1}]
+        discovery_result.completed_successfully = True
+        discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+        download_result = MagicMock()
+        download_result.success = True
+        download_result.bytes_written = 11
+        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        fixity_result = FixityResult(
+            success=True,
+            warc_path=download_result.destination_path,
+            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_hexdigest='abc123',
+            size=11,
+            source_url='https://example.org/reconciliation-alpha.warc.gz',
+            completed_at='2026-03-06T12:34:56+00:00',
+            error_message=None,
+        )
+        loaded_state = {
+            'enumeration_checkpoint_store_time_max': None,
+            'files': {
+                'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
+                    'source_url': 'https://example.org/reconciliation-alpha.warc.gz',
+                    'warc_path': '/tmp/storage/collections/123/warcs/2026/03/missing-alpha.warc.gz',
+                    'status': 'failed',
+                }
+            },
+        }
+
+        with (
+            patch('lib.orchestration.load_collection_state', return_value=loaded_state),
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
+            patch('lib.orchestration.save_collection_state'),
+            patch('lib.orchestration.build_planned_download_paths', return_value=[]),
+            patch('lib.orchestration.log_planned_download_paths'),
+            patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
+            patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result),
+            patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
+            patch('lib.orchestration.update_collection_processing_status'),
+            patch('lib.orchestration.update_collection_final_reporting'),
+            patch('lib.orchestration.datetime') as mock_datetime,
+        ):
+            mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+            result = process_collection_job(
+                client,
+                collection_job,
+                Path('/tmp/storage'),
+                'https://example.org/wasapi',
+                worksheet,
+                header_location,
+            )
+
+        self.assertEqual(mock_download.call_count, 1)
+        self.assertEqual(mock_download.call_args.args[1], 'https://example.org/reconciliation-alpha.warc.gz')
+        self.assertEqual(mock_log_summary.call_args.args[2], 1)
+        self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
 
 
 class TestCollectionReportingHelpers(TestCase):
