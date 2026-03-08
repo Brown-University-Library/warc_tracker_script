@@ -1,5 +1,5 @@
 - review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
- - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
- - make a detailed next-step plan based on your """Option 1: Expand sequential spreadsheet phase/progress reporting""" next-step suggestion.
- - save that info to `warc_tracker_script/PLAN__next_single_step.md`, fully replacing all previous content. 
- - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
+- review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
+- review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them, being sure that previous and new tests pass.
+- update `warc_tracker_script/PLAN__simplified_warc_backup_script.md` with what has been completed.
+- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.

@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +33,8 @@ DEFAULT_STORAGE_ROOT: Path = Path(__file__).resolve().parent.parent / 'storage'
 log = logging.getLogger(__name__)
 
 STATUS_DISCOVERY_IN_PROGRESS = 'discovery-in-progress'
+STATUS_DOWNLOAD_PLANNING_COMPLETE = 'download-planning-complete'
+STATUS_DOWNLOADING_IN_PROGRESS = 'downloading-in-progress'
 STATUS_NO_NEW_FILES_TO_DOWNLOAD = 'no-new-files-to-download'
 STATUS_DOWNLOADED_WITHOUT_ERRORS = 'downloaded-without-errors'
 STATUS_COMPLETED_WITH_SOME_FILE_FAILURES = 'completed-with-some-file-failures'
@@ -39,6 +42,8 @@ STATUS_DISCOVERY_FAILED = 'discovery-failed'
 STATUS_SPREADSHEET_UPDATE_FAILED = 'spreadsheet-update-failed'
 DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN = 'full-backfill-first-run'
 DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW = 'incremental-overlap-window'
+
+DOWNLOAD_PROGRESS_MILESTONES = (20, 40, 60, 80)
 
 
 @dataclass(frozen=True)
@@ -342,12 +347,101 @@ def persist_planned_downloads_to_state(
     )
 
 
+def build_collection_status_update(status_main: str, status_detail: str) -> CollectionProcessingStatusUpdate:
+    """
+    Builds a collection-level processing status payload.
+    """
+    result = CollectionProcessingStatusUpdate(
+        processing_status_main=status_main,
+        processing_status_detail=status_detail,
+    )
+    return result
+
+
+def write_collection_status_update(
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+    collection_job: CollectionJob,
+    status_update: CollectionProcessingStatusUpdate,
+) -> None:
+    """
+    Writes one collection-level processing status update to the spreadsheet.
+    """
+    update_collection_processing_status(worksheet, header_location, collection_job.row_number, status_update)
+
+
+def build_download_planning_status(planned_download_count: int) -> CollectionProcessingStatusUpdate:
+    """
+    Builds the collection-level status update written after download planning completes.
+    """
+    result = build_collection_status_update(
+        STATUS_DOWNLOAD_PLANNING_COMPLETE,
+        f'{planned_download_count} files planned',
+    )
+    return result
+
+
+def build_no_new_files_status(discovery_completed_at: str) -> CollectionProcessingStatusUpdate:
+    """
+    Builds the collection-level status update written when no downloads are needed.
+    """
+    result = build_collection_status_update(
+        STATUS_NO_NEW_FILES_TO_DOWNLOAD,
+        f'since {discovery_completed_at}',
+    )
+    return result
+
+
+def build_download_start_status(total_planned_downloads: int) -> CollectionProcessingStatusUpdate:
+    """
+    Builds the initial collection-level download-in-progress status update.
+    """
+    result = build_collection_status_update(
+        STATUS_DOWNLOADING_IN_PROGRESS,
+        f'0% (0/{total_planned_downloads} files)',
+    )
+    return result
+
+
+def build_download_progress_detail(percent_complete: int, completed_count: int, total_count: int) -> str:
+    """
+    Builds compact progress-detail text for one download milestone.
+    """
+    result = f'{percent_complete}% ({completed_count}/{total_count} files)'
+    return result
+
+
+def get_download_progress_milestone_update(
+    total_count: int,
+    completed_count: int,
+    last_reported_percent: int,
+) -> tuple[int, str | None]:
+    """
+    Returns the next coarse progress milestone text, if a new milestone has been reached.
+    """
+    next_reported_percent = last_reported_percent
+    progress_detail: str | None = None
+    if total_count > 0 and completed_count < total_count:
+        percent_complete = (completed_count * 100) // total_count
+        for milestone_percent in DOWNLOAD_PROGRESS_MILESTONES:
+            if percent_complete >= milestone_percent and milestone_percent > last_reported_percent:
+                next_reported_percent = milestone_percent
+                progress_detail = build_download_progress_detail(
+                    milestone_percent,
+                    completed_count,
+                    total_count,
+                )
+    result = (next_reported_percent, progress_detail)
+    return result
+
+
 def run_planned_downloads(
     client: httpx.Client,
     storage_root: Path,
     collection_id: int,
     state: dict[str, object],
     planned_downloads: list[PlannedDownload],
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[DownloadResult], list[FixityResult]]:
     """
     Downloads planned WARC files sequentially, generates fixity for successful downloads, and returns the per-file results.
@@ -355,6 +449,8 @@ def run_planned_downloads(
     """
     results: list[DownloadResult] = []
     fixity_results: list[FixityResult] = []
+    last_reported_percent = 0
+    total_planned_downloads = len(planned_downloads)
     for planned_download in planned_downloads:
         destination_path = planned_download.planned_paths.warc_path
         if destination_path.exists():
@@ -432,6 +528,15 @@ def run_planned_downloads(
                 planned_download.source_url,
                 download_result.error_message,
             )
+        completed_count = len(results)
+        last_reported_percent, progress_detail = get_download_progress_milestone_update(
+            total_planned_downloads,
+            completed_count,
+            last_reported_percent,
+        )
+        if progress_detail is not None and progress_callback is not None:
+            log.info('Collection %s wrote download progress milestone: %s', collection_id, progress_detail)
+            progress_callback(progress_detail)
     result = (results, fixity_results)
     return result
 
@@ -463,7 +568,6 @@ def log_collection_download_summary(
         fixity_success_count,
         fixity_failure_count,
     )
-    log.info('Collection %s spreadsheet progress updates are not implemented yet.', collection_job.collection_id)
 
 
 def build_collection_summary_update(
@@ -578,11 +682,60 @@ def write_collection_start_status(
     status_detail = 'full historical backfill'
     if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
         status_detail = f'store-time-after {after_datetime.isoformat()}'
-    status_update = CollectionProcessingStatusUpdate(
-        processing_status_main=STATUS_DISCOVERY_IN_PROGRESS,
-        processing_status_detail=status_detail,
-    )
-    update_collection_processing_status(worksheet, header_location, collection_job.row_number, status_update)
+    status_update = build_collection_status_update(STATUS_DISCOVERY_IN_PROGRESS, status_detail)
+    write_collection_status_update(worksheet, header_location, collection_job, status_update)
+
+
+def write_collection_download_planning_status(
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+    collection_job: CollectionJob,
+    planned_download_count: int,
+) -> None:
+    """
+    Writes the collection-level status after download planning completes.
+    """
+    status_update = build_download_planning_status(planned_download_count)
+    write_collection_status_update(worksheet, header_location, collection_job, status_update)
+
+
+def write_collection_no_new_files_status(
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+    collection_job: CollectionJob,
+    discovery_completed_at: str,
+) -> None:
+    """
+    Writes the collection-level status for a no-op collection after planning.
+    """
+    status_update = build_no_new_files_status(discovery_completed_at)
+    write_collection_status_update(worksheet, header_location, collection_job, status_update)
+
+
+def write_collection_download_start_status(
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+    collection_job: CollectionJob,
+    total_planned_downloads: int,
+) -> None:
+    """
+    Writes the collection-level status when sequential downloading begins.
+    """
+    status_update = build_download_start_status(total_planned_downloads)
+    write_collection_status_update(worksheet, header_location, collection_job, status_update)
+
+
+def write_collection_download_progress_status(
+    worksheet: gspread.Worksheet,
+    header_location: HeaderLocation,
+    collection_job: CollectionJob,
+    progress_detail: str,
+) -> None:
+    """
+    Writes one coarse collection-level download progress milestone.
+    """
+    status_update = build_collection_status_update(STATUS_DOWNLOADING_IN_PROGRESS, progress_detail)
+    write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
 def write_collection_final_report(
@@ -635,6 +788,7 @@ def process_collection_job(
         )
 
     write_collection_start_status(worksheet, header_location, collection_job, discovery_mode, after_datetime)
+    log.info('Collection %s spreadsheet status updated: discovery in progress.', collection_job.collection_id)
 
     discovery_result = fetch_collection_discovery(
         client=client,
@@ -688,12 +842,50 @@ def process_collection_job(
         planned_downloads=planned_downloads,
         discovered_at=datetime.now(UTC).isoformat(),
     )
+    write_collection_download_planning_status(
+        worksheet,
+        header_location,
+        collection_job,
+        len(planned_downloads),
+    )
+    log.info(
+        'Collection %s spreadsheet status updated: download planning complete with %s files planned.',
+        collection_job.collection_id,
+        len(planned_downloads),
+    )
+    if not planned_downloads:
+        discovery_completed_at = datetime.now(UTC).isoformat()
+        write_collection_no_new_files_status(
+            worksheet,
+            header_location,
+            collection_job,
+            discovery_completed_at,
+        )
+        log.info('Collection %s spreadsheet status updated: no new files to download.', collection_job.collection_id)
+    else:
+        write_collection_download_start_status(
+            worksheet,
+            header_location,
+            collection_job,
+            len(planned_downloads),
+        )
+        log.info(
+            'Collection %s spreadsheet status updated: downloading in progress for %s planned files.',
+            collection_job.collection_id,
+            len(planned_downloads),
+        )
     download_results, fixity_results = run_planned_downloads(
         client,
         storage_root,
         collection_job.collection_id,
         state,
         planned_downloads,
+        lambda progress_detail: write_collection_download_progress_status(
+            worksheet,
+            header_location,
+            collection_job,
+            progress_detail,
+        ),
     )
     log_collection_download_summary(
         collection_job,
@@ -711,4 +903,5 @@ def process_collection_job(
         fixity_results=fixity_results,
     )
     write_collection_final_report(worksheet, header_location, collection_job, result)
+    log.info('Collection %s spreadsheet status updated: final outcome written.', collection_job.collection_id)
     return result

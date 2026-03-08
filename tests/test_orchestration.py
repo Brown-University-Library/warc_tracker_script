@@ -17,16 +17,22 @@ from lib.orchestration import (
     DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN,
     DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW,
     STATUS_COMPLETED_WITH_SOME_FILE_FAILURES,
+    STATUS_DISCOVERY_IN_PROGRESS,
     STATUS_DOWNLOADED_WITHOUT_ERRORS,
+    STATUS_DOWNLOADING_IN_PROGRESS,
+    STATUS_DOWNLOAD_PLANNING_COMPLETE,
+    STATUS_NO_NEW_FILES_TO_DOWNLOAD,
     PlannedDownload,
     build_collection_failure_report,
     build_collection_final_report,
+    build_download_progress_detail,
     build_planned_download_paths,
     build_planned_downloads,
     build_reconciliation_retry_downloads,
     count_pending_download_candidates,
     determine_collection_discovery_mode,
     get_archive_it_credentials,
+    get_download_progress_milestone_update,
     get_downloaded_storage_root,
     get_record_source_url,
     merge_planned_downloads,
@@ -389,7 +395,13 @@ class TestProcessCollectionJob(TestCase):
         )
         self.assertEqual(saved_state['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
         self.assertIsNone(mock_fetch.call_args.kwargs['after_datetime'])
-        self.assertEqual(mock_update_status.call_args.args[3].processing_status_detail, 'full historical backfill')
+        status_updates = [call.args[3] for call in mock_update_status.call_args_list]
+        self.assertEqual(status_updates[0].processing_status_main, STATUS_DISCOVERY_IN_PROGRESS)
+        self.assertEqual(status_updates[0].processing_status_detail, 'full historical backfill')
+        self.assertEqual(status_updates[1].processing_status_main, STATUS_DOWNLOAD_PLANNING_COMPLETE)
+        self.assertEqual(status_updates[1].processing_status_detail, '1 files planned')
+        self.assertEqual(status_updates[2].processing_status_main, STATUS_DOWNLOADING_IN_PROGRESS)
+        self.assertEqual(status_updates[2].processing_status_detail, '0% (0/1 files)')
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_download.call_count, 1)
@@ -402,6 +414,67 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '1')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '11')
+
+    def test_zero_planned_downloads_write_planning_then_no_new_files_statuses(self):
+        """
+        Checks that zero planned downloads write planning-complete and no-new-files intermediate statuses.
+        """
+        collection_job = CollectionJob(
+            collection_id=123,
+            repository='UA',
+            collection_url='https://example.com',
+            collection_name='Example',
+            row_number=7,
+        )
+        client = MagicMock(spec=httpx.Client)
+        worksheet = MagicMock()
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 0,
+                'processing_status_detail': 1,
+                'summary_status_last_wasapi_check': 2,
+                'summary_status_downloaded_warcs_count': 3,
+                'summary_status_downloaded_warcs_size': 4,
+                'summary_status_server_path': 5,
+            },
+        )
+        discovery_result = MagicMock()
+        discovery_result.records = []
+        discovery_result.request_records = [{'page': 1}]
+        discovery_result.completed_successfully = True
+        discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+
+        with (
+            patch(
+                'lib.orchestration.load_collection_state',
+                return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
+            ),
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
+            patch('lib.orchestration.save_collection_state'),
+            patch('lib.orchestration.log_planned_download_paths'),
+            patch('lib.orchestration.log_collection_download_summary'),
+            patch('lib.orchestration.update_collection_processing_status') as mock_update_status,
+            patch('lib.orchestration.update_collection_final_reporting'),
+            patch('lib.orchestration.datetime') as mock_datetime,
+        ):
+            mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+            result = process_collection_job(
+                client,
+                collection_job,
+                Path('/tmp/storage'),
+                'https://example.org/wasapi',
+                worksheet,
+                header_location,
+            )
+
+        status_updates = [call.args[3] for call in mock_update_status.call_args_list]
+        self.assertEqual(status_updates[0].processing_status_main, STATUS_DISCOVERY_IN_PROGRESS)
+        self.assertEqual(status_updates[1].processing_status_main, STATUS_DOWNLOAD_PLANNING_COMPLETE)
+        self.assertEqual(status_updates[1].processing_status_detail, '0 files planned')
+        self.assertEqual(status_updates[2].processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
+        self.assertEqual(status_updates[2].processing_status_detail, 'since 2026-03-07T15:00:00+00:00')
+        self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
 
     def test_planned_downloads_persisted_before_download_attempts(self):
         """
@@ -459,20 +532,20 @@ class TestProcessCollectionJob(TestCase):
                 'lib.orchestration.load_collection_state',
                 return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
             ),
-            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result) as mock_fetch,
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
             patch('lib.orchestration.save_collection_state') as mock_save,
-            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
-            patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
+            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']),
+            patch('lib.orchestration.log_planned_download_paths'),
             patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
             patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result) as mock_fixity,
             patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
-            patch('lib.orchestration.update_collection_processing_status') as mock_update_status,
-            patch('lib.orchestration.update_collection_final_reporting') as mock_final_reporting,
+            patch('lib.orchestration.update_collection_processing_status'),
+            patch('lib.orchestration.update_collection_final_reporting'),
             patch('lib.orchestration.datetime') as mock_datetime,
         ):
             mock_save.side_effect = lambda storage_root, collection_id, state: saved_state_snapshots.append(deepcopy(state))
             mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
-            result = process_collection_job(
+            process_collection_job(
                 client,
                 collection_job,
                 Path('/tmp/storage'),
@@ -483,7 +556,6 @@ class TestProcessCollectionJob(TestCase):
 
         self.assertEqual(len(saved_state_snapshots), 4)
         planning_state = deepcopy(saved_state_snapshots[1])
-        saved_state = deepcopy(saved_state_snapshots[-1])
         self.assertEqual(
             planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['status'],
             'pending_download',
@@ -564,7 +636,7 @@ class TestProcessCollectionJob(TestCase):
             ),
             patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
             patch('lib.orchestration.save_collection_state') as mock_save,
-            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
+            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']),
             patch('lib.orchestration.log_planned_download_paths'),
             patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
             patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result),
@@ -663,8 +735,9 @@ class TestProcessCollectionJob(TestCase):
             mock_fetch.call_args.kwargs['after_datetime'],
             datetime(2026, 1, 30, 12, 0, 0, tzinfo=UTC),
         )
+        status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(
-            mock_update_status.call_args.args[3].processing_status_detail,
+            status_updates[0].processing_status_detail,
             'store-time-after 2026-01-30T12:00:00+00:00',
         )
         self.assertEqual(mock_save.call_args.args[2]['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
@@ -837,6 +910,34 @@ class TestRunPlannedDownloads(TestCase):
     Test cases for the sequential planned-download loop.
     """
 
+    def test_download_progress_helper_formats_expected_milestone_text(self):
+        """
+        Checks that progress-detail text uses the expected compact milestone format.
+        """
+        result = build_download_progress_detail(40, 6, 15)
+
+        self.assertEqual(result, '40% (6/15 files)')
+
+    def test_download_progress_helper_emits_only_new_milestones(self):
+        """
+        Checks that milestone updates are emitted only when a new progress bucket is reached.
+        """
+        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 1, 0)
+        self.assertEqual(last_reported_percent, 0)
+        self.assertIsNone(progress_detail)
+
+        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 3, last_reported_percent)
+        self.assertEqual(last_reported_percent, 20)
+        self.assertEqual(progress_detail, '20% (3/15 files)')
+
+        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 4, last_reported_percent)
+        self.assertEqual(last_reported_percent, 20)
+        self.assertIsNone(progress_detail)
+
+        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 6, last_reported_percent)
+        self.assertEqual(last_reported_percent, 40)
+        self.assertEqual(progress_detail, '40% (6/15 files)')
+
     def test_logs_debug_message_immediately_before_download_attempt(self):
         """
         Checks that a debug log entry is emitted before a planned download begins.
@@ -880,6 +981,53 @@ class TestRunPlannedDownloads(TestCase):
                 'https://example.org/alpha.warc.gz',
                 Path('/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'),
             ),
+        )
+
+    def test_progress_callback_emits_only_coarse_download_milestones(self):
+        """
+        Checks that the sequential download loop emits only coarse milestone progress updates.
+        """
+        planned_downloads = [
+            PlannedDownload(
+                filename=f'ARCHIVEIT-123-2026030612345{index}-0000{index}-alpha.warc.gz',
+                source_url=f'https://example.org/{index}.warc.gz',
+                planned_paths=build_planned_download_paths(
+                    Path('/tmp/storage'),
+                    123,
+                    [{'filename': f'ARCHIVEIT-123-2026030612345{index}-0000{index}-alpha.warc.gz'}],
+                )[0],
+            )
+            for index in range(5)
+        ]
+        state = {'files': {}}
+        client = MagicMock(spec=httpx.Client)
+        download_result = MagicMock()
+        download_result.success = False
+        download_result.error_message = '502 Bad Gateway'
+        progress_updates: list[str] = []
+
+        with (
+            patch('lib.orchestration.download_to_path', return_value=download_result),
+            patch('lib.orchestration.save_collection_state'),
+            patch('pathlib.Path.exists', return_value=False),
+        ):
+            run_planned_downloads(
+                client=client,
+                storage_root=Path('/tmp/storage'),
+                collection_id=123,
+                state=state,
+                planned_downloads=planned_downloads,
+                progress_callback=progress_updates.append,
+            )
+
+        self.assertEqual(
+            progress_updates,
+            [
+                '20% (1/5 files)',
+                '40% (2/5 files)',
+                '60% (3/5 files)',
+                '80% (4/5 files)',
+            ],
         )
 
 

@@ -38,11 +38,13 @@ Completed so far:
 - filesystem-reconciliation retry planning exists in `lib/orchestration.py`; it scans `state.json` manifest entries, queues retry candidates for files whose recorded `warc_path` is missing on disk and whose `source_url` remains usable, merges those candidates with fresh WASAPI discovery-based planned downloads, deduplicates by filename while preferring discovery candidates, and feeds the merged set into the existing sequential download/fixity loop
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, fixity helpers, production orchestration helpers including first-run versus checkpointed discovery behavior, pre-download manifest persistence, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
 - additional focused `unittest` coverage exists for reconciliation-driven retry planning, malformed manifest-entry skipping, filename-level merge/dedup behavior, and reconciliation-only download candidates flowing through the current sequential production orchestration
+- the sequential production spreadsheet reporting flow now writes bounded intermediate collection statuses for `discovery-in-progress`, `download-planning-complete`, `downloading-in-progress`, and `no-new-files-to-download`, plus coarse `20%`/`40%`/`60%`/`80%` mid-download progress milestones while keeping final collection reporting authoritative
+- focused `unittest` coverage now exists for the sequential spreadsheet phase transition ordering and coarse download-progress milestone behavior
 
 Not yet implemented in the production backup flow:
 
-- spreadsheet reporting expansion, including richer sequential phase/status reporting and mid-download progress updates
 - Trio orchestration with two dedicated download workers and a separate sheet updater
+- moving spreadsheet writes behind the later dedicated sheet-updater task
 - lock and cron wrapper hardening
 
 ---
@@ -596,8 +598,8 @@ Keep this minimal and practical.
 12. Expand spreadsheet write/update behavior.
    - [x] validate required reporting columns up front
    - [x] write collection-level start/final status updates from the existing sequential flow
-   - next slice: add richer sequential phase/status reporting and mid-download progress reporting
-   - later slice: move sheet writes behind the dedicated sheet-updater task
+   - [x] add richer sequential phase/status reporting and mid-download progress reporting
+   - next slice: move sheet writes behind the dedicated sheet-updater task
 13. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
