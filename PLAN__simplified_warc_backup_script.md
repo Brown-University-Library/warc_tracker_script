@@ -41,7 +41,7 @@ Completed so far:
 
 Not yet implemented in the production backup flow:
 
-- spreadsheet reporting expansion, including up-front validation of required reporting columns and mid-download progress updates
+- spreadsheet reporting expansion, including richer sequential phase/status reporting and mid-download progress updates
 - Trio orchestration with two dedicated download workers and a separate sheet updater
 - lock and cron wrapper hardening
 
@@ -401,17 +401,18 @@ Recommended MVP split:
   - `summary_status_downloaded_warcs_size`
   - `summary_status_server_path`
 
-### Required TODO if validation is not yet implemented in code
+Current production status:
 
-If the production code does not already validate that the required spreadsheet/worksheet status fields exist before significant processing begins, add an explicit project TODO during implementation.
+- the production code validates these required reporting/status columns before significant processing begins
+- the production code writes collection-level start and final status/summary updates from the existing sequential flow
+- the main remaining spreadsheet-update work is expanding in-run status detail and mid-download progress reporting
 
-That TODO should state, in substance:
+Implementation note:
 
-- validate required status-reporting worksheet fields up front before discovery/download processing starts
-- fail early with a clear error when a required field is missing
-- require `processing_status_main`, `processing_status_detail`, `summary_status_last_wasapi_check`, `summary_status_downloaded_warcs_count`, `summary_status_downloaded_warcs_size`, and `summary_status_server_path` to exist before processing begins
+- keep failing early with a clear error if any required reporting/status field is missing
+- treat progress-reporting expansion as a later slice layered on top of the existing required-column validation and start/final reporting behavior
 
-This TODO should remain until the validation behavior exists in production code.
+This plan should not treat required reporting-column validation as an unimplemented next step unless the production code regresses.
 
 ### Recommended collection-level status lifecycle
 
@@ -592,9 +593,11 @@ Keep this minimal and practical.
 9. [x] Implement durable local manifest updates for download and fixity outcomes.
 10. [x] Persist planned-download manifest entries before downloads begin so discovered/planned files are durably visible in `state.json` before the sequential download loop starts.
 11. [x] Add filesystem-reconciliation retry planning so missing local WARCs recorded in `state.json` are retried even when WASAPI does not rediscover them.
-12. Implement spreadsheet write/update behavior.
-   - first slice: validate required reporting columns up front and write collection-level start/final status updates from the existing sequential flow
-   - later slice: add mid-download progress reporting and move sheet writes behind the dedicated sheet-updater task
+12. Expand spreadsheet write/update behavior.
+   - [x] validate required reporting columns up front
+   - [x] write collection-level start/final status updates from the existing sequential flow
+   - next slice: add richer sequential phase/status reporting and mid-download progress reporting
+   - later slice: move sheet writes behind the dedicated sheet-updater task
 13. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
