@@ -31,6 +31,7 @@ from lib.orchestration import (
     get_record_source_url,
     merge_planned_downloads,
     process_collection_job,
+    run_planned_downloads,
 )
 
 
@@ -829,6 +830,57 @@ class TestProcessCollectionJob(TestCase):
         )
         self.assertEqual(saved_manifest_entry['discovered_at'], '2026-03-07T15:00:00+00:00')
         self.assertEqual(mock_download.call_count, 1)
+
+
+class TestRunPlannedDownloads(TestCase):
+    """
+    Test cases for the sequential planned-download loop.
+    """
+
+    def test_logs_debug_message_immediately_before_download_attempt(self):
+        """
+        Checks that a debug log entry is emitted before a planned download begins.
+        """
+        planned_download = PlannedDownload(
+            filename='ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+            source_url='https://example.org/alpha.warc.gz',
+            planned_paths=build_planned_download_paths(
+                Path('/tmp/storage'),
+                123,
+                [{'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'}],
+            )[0],
+        )
+        state = {'files': {}}
+        client = MagicMock(spec=httpx.Client)
+        download_result = MagicMock()
+        download_result.success = False
+        download_result.error_message = '502 Bad Gateway'
+
+        with (
+            patch('lib.orchestration.download_to_path', return_value=download_result),
+            patch('lib.orchestration.save_collection_state'),
+            patch('lib.orchestration.log.debug') as mock_log_debug,
+            patch('pathlib.Path.exists', return_value=False),
+        ):
+            run_planned_downloads(
+                client=client,
+                storage_root=Path('/tmp/storage'),
+                collection_id=123,
+                state=state,
+                planned_downloads=[planned_download],
+            )
+
+        self.assertTrue(mock_log_debug.called)
+        self.assertEqual(
+            mock_log_debug.call_args.args,
+            (
+                'Collection ``%s`` about to download ``%s`` from ``%s`` to ``%s``',
+                123,
+                'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+                'https://example.org/alpha.warc.gz',
+                Path('/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'),
+            ),
+        )
 
 
 class TestCollectionReportingHelpers(TestCase):

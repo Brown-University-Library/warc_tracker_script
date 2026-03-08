@@ -366,6 +366,13 @@ def run_planned_downloads(
             )
             continue
 
+        log.debug(
+            'Collection ``%s`` about to download ``%s`` from ``%s`` to ``%s``',
+            collection_id,
+            planned_download.filename,
+            planned_download.source_url,
+            destination_path,
+        )
         download_result = download_to_path(client, planned_download.source_url, destination_path)
         results.append(download_result)
         update_file_manifest_for_download_result(

@@ -1,7 +1,4 @@
 - review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
 - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- i want to implement _only_ (for now) "### Recommendation 1: persist discovered/planned files to state before downloads begin", from `warc_tracker_script/PLAN__update_download_code.md`.
-- implement that, ensuring that all tests pass.
-- update `warc_tracker_script/PLAN__simplified_warc_backup_script.md` with what was implemented.
-- update `warc_tracker_script/PLAN__update_download_code.md` with what was implemented.
+- add one debug-logging entry when a file is about to be downloaded, to make it easier to tell from a view of the logs what's happening. (If updated code is already doing this, never-mind.)
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
