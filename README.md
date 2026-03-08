@@ -38,6 +38,30 @@
 
 ---
 
+### spreadsheet updates
+
+- The tracking spreadsheet is used as a reporting and control interface for collection-level backup activity.
+
+- It helps an operator quickly see whether a collection is currently being checked, whether downloads are planned, whether there is nothing new to fetch, and what the final collection outcome was.
+
+- The spreadsheet is **not** the source of truth for file correctness or retry logic.
+
+- The local filesystem plus each collection's `state.json` remain authoritative for what has been discovered, downloaded, and recorded durably. These files can be viewed at `(server)/warc_downloads/collections/collection-ID/state.json`.
+
+- In the current sequential flow, spreadsheet updates are written at a small number of collection-level checkpoints:
+  - when discovery begins
+  - after download planning completes
+  - when no new files need download
+  - when downloading begins
+  - at coarse in-progress milestones during downloading
+  - when final collection reporting is written
+
+- The in-progress download updates are intentionally coarse rather than per-file chatter.
+
+- This keeps the sheet useful for monitoring without making spreadsheet state responsible for correctness.
+
+---
+
 ## Current module responsibilities
 
 - `main.py` remains a thin entry point that loads config, configures logging, opens an authenticated `httpx.Client`, and iterates collection jobs.
@@ -52,4 +76,3 @@
 [^durable]: Here, durable means the recorded outcomes are meant to survive process exits, crashes, and later reruns because they are written into `state.json` on disk, not just kept in memory for the current execution.
 
 ---
-
