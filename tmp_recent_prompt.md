@@ -1,4 +1,5 @@
 - review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
-- review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- add one debug-logging entry when a file is about to be downloaded, to make it easier to tell from a view of the logs what's happening. (If updated code is already doing this, never-mind.)
-- save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
+ - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
+ - make a detailed next-step plan based on your """Option 1: Expand sequential spreadsheet phase/progress reporting""" next-step suggestion.
+ - save that info to `warc_tracker_script/PLAN__next_single_step.md`, fully replacing all previous content. 
+ - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.

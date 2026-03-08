@@ -1,195 +1,317 @@
-# Next Single Step: Filesystem-Reconciliation Retry Guarantee
+# Next Single Step: Expand Sequential Spreadsheet Phase and Progress Reporting
  
  ## Context for Future Agents
  
  **Code-directives**: review `warc_tracker_script/AGENTS.md` before editing code.
  
- **Plan references**:
+ **Plan reference**:
  
  - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
- - `warc_tracker_script/PLAN__suggest_retry_guarantees.md`
  
- **Focus of this step**: implement the chosen **filesystem-reconciliation** approach so future runs retry failed downloads and also recover any files that are missing on disk but still represented in `state.json`.
+ **Focus of this step**: expand the existing sequential spreadsheet-update behavior so the production flow writes richer collection-level phase/status updates and coarse mid-download progress updates.
  
- The intended behavior is:
+ The production code already does these pieces:
  
- - load a collection's `state.json`
- - review all manifest entries under `files`
- - compare each entry's expected `warc_path` against the filesystem
- - if a manifest entry has a usable `source_url` and its WARC file is missing on disk, queue it for download
- - merge those reconciliation-driven retry candidates with normal WASAPI discovery candidates
- - deduplicate by filename before the existing sequential download loop runs
+ - validates required reporting/status columns before significant processing begins
+ - writes collection-level start status updates
+ - writes collection-level final status/summary updates
+ - keeps the main backup flow sequential
  
- This should be implemented with the smallest clear change in the existing sequential orchestration.
+ The intended addition in this step is:
+ 
+ - write clearer intermediate collection phases during the sequential flow
+ - write coarse progress milestones while downloads are in progress
+ - keep the spreadsheet as a reporting/control surface rather than a source of truth
+ - make the smallest clear change without starting the later Trio sheet-updater architecture
  
  ---
  ## Goal of This Step
  
- Add one reconciliation-based planning step to the current flow so the downloader no longer depends only on fresh WASAPI rediscovery to retry known missing files.
+ Extend the existing sequential orchestration so each processed collection reports a clearer lifecycle in the spreadsheet:
  
- Specifically:
+ 1. when discovery begins
+ 2. when download planning finishes
+ 3. whether there are no files to download or downloading is underway
+ 4. coarse progress milestones during downloading
+ 5. the final outcome summary that already exists
  
- 1. load the collection's local `state.json`
- 2. inspect all manifest entries in `state['files']`
- 3. identify entries that have both:
-    - a usable `source_url`
-    - a usable `warc_path` whose file is currently absent on disk
- 4. convert those entries into planned download candidates
- 5. merge them with discovery-based planned downloads
- 6. deduplicate by filename
- 7. let the existing sequential download/fixity loop process the merged set
+ Specifically, this step should add bounded, collection-level status writes for:
+ 
+ - `discovery-in-progress`
+ - `download-planning-complete`
+ - `no-new-files-to-download` when applicable
+ - `downloading-in-progress` with milestone-style `processing_status_detail`
  
  That is the whole feature for this step.
  
  ---
  ## Why This Is the Right Next Step
  
- 1. **It matches the user's chosen approach**
-    - the selected plan is Option 2 from `PLAN__suggest_retry_guarantees.md`
-    - the core idea is filesystem reconciliation against manifest entries
+ 1. **It is the explicit next unfinished slice in the master plan**
+    - step 12 in `PLAN__simplified_warc_backup_script.md` already marks required-column validation and start/final writes as done
+    - the plan names richer sequential phase/status reporting and mid-download progress reporting as the next slice
  
- 2. **It gives the desired guarantee**
-    - failed downloads will be retried if their local WARC is still absent
-    - missing files can be recovered even if they are no longer rediscovered by the current overlap window
+ 2. **It fits the current architecture**
+    - the production flow is already sequential and working
+    - the plan explicitly says the Trio architecture is not implemented yet
+    - this work improves visibility without introducing concurrency complexity
  
- 3. **It fits the master plan's source-of-truth model**
-    - the local filesystem remains the source of truth for actual WARC presence
-    - `state.json` remains the operational manifest and checkpoint store
+ 3. **It improves cron-time observability**
+    - operators can tell whether a collection is in discovery, planning, no-op, or downloading
+    - operators can see bounded progress without turning the sheet into a per-file event log
  
- 4. **It fits the current code shape**
-    - `main.py` stays thin
-    - `lib/orchestration.py` remains the place where candidate downloads are assembled
-    - `run_planned_downloads()` can remain mostly unchanged because it already uses filesystem existence checks
+ 4. **It prepares later async work**
+    - a clearer sequential status model will make the later dedicated sheet-updater task easier to design
+    - this step clarifies what events the future async updater will need to handle
+ 
+ ---
+ ## Guiding Constraints from the Project Plan
+ 
+ This step should follow these project rules from `PLAN__simplified_warc_backup_script.md`:
+ 
+ - the local filesystem and `state.json` remain the source of truth
+ - the spreadsheet is for reporting and control, not correctness
+ - writes should stay controlled and not become highly chatty
+ - progress detail should use coarse, stable milestone text rather than per-file chatter
+ - the current sequential orchestration remains the execution path for now
+ 
+ Recommended status model from the master plan:
+ 
+ - `pending`
+ - `discovery-in-progress`
+ - `download-planning-complete`
+ - `downloading-in-progress`
+ - `no-new-files-to-download`
+ - final outcomes already supported by current code
+ 
+ Recommended progress-detail style from the master plan:
+ 
+ - milestone updates such as `20% (3/15 files)`
+ - compact, human-readable detail text
+ - no noisy per-file status writes unless later proven necessary
  
  ---
  ## Specific Implementation Plan
  
- ### 1. Add a helper that builds reconciliation retry candidates from `state.json`
+ ### 1. Review the current sheet-update helpers and status-writing flow
  
- In `lib/orchestration.py`, add a helper that scans the loaded collection state and returns `PlannedDownload` items for manifest entries that should be retried.
+ Before editing behavior, inspect the current production code path that:
  
- The helper should:
+ - validates required reporting/status columns
+ - writes the initial collection-level status
+ - writes the final collection-level summary and outcome
  
- - read `state.get('files')`
- - ignore entries that are not dictionaries
- - require a non-empty filename key
- - require a usable `source_url`
- - require a usable `warc_path`
- - check whether `Path(warc_path).exists()`
- - if the WARC exists, do not queue it
- - if the WARC is missing, derive planned paths for that filename using `plan_collection_paths()` rather than trusting sidecar paths from state
- - return a list of `PlannedDownload` objects
+ The purpose of this review is to identify the existing abstraction boundary so the new intermediate writes re-use current helper functions instead of duplicating spreadsheet-write code.
  
- Important design choice:
+ Expected outcome of this review:
  
- - use the manifest entry only to discover that a file is missing and recover its `source_url`
- - use `plan_collection_paths()` to rebuild the canonical local paths so the orchestration continues to rely on the current storage-layout rules
+ - identify the helper or helpers in `lib/orchestration.py` and related spreadsheet modules that already write collection status
+ - confirm how `processing_status_main`, `processing_status_detail`, and `summary_status_*` values are currently assembled
+ - keep `main.py` unchanged unless a tiny orchestration call-site adjustment is required
  
- ### 2. Add a helper that merges and deduplicates planned downloads by filename
+ ### 2. Define one explicit sequential phase lifecycle in code
  
- The current code already builds discovery-based `planned_downloads`.
+ Add or consolidate a small, explicit set of status constants or enum-like values used by the sequential flow.
  
- Add a small helper that merges:
+ The first slice should cover these intermediate statuses:
  
- - reconciliation-based retry candidates from state
- - discovery-based candidates from WASAPI
+ - `discovery-in-progress`
+ - `download-planning-complete`
+ - `downloading-in-progress`
+ - `no-new-files-to-download`
  
- Deduplicate by filename.
+ Important design rule:
  
- Recommended merge rule for this step:
+ - do not generate ad hoc `processing_status_main` strings inline at many call sites
+ - define the allowed values in one place so future spreadsheet writes stay consistent
  
- - prefer the discovery-based candidate when the same filename appears in both sources
- - otherwise keep whichever single candidate exists
+ This should match the master plan's recommendation that `processing_status_main` remain bounded and explicit.
  
- This keeps normal discovery authoritative when available, while still guaranteeing retries for missing files that are no longer rediscovered.
+ ### 3. Add a status write when discovery begins
  
- ### 3. Integrate reconciliation before `run_planned_downloads()`
+ In the current sequential `process_collection_job()` flow, write an early collection update when WASAPI discovery for that collection starts.
  
- In `process_collection_job()`:
+ Recommended behavior:
  
- - keep the existing discovery flow
- - keep the existing checkpoint handling
- - keep the existing discovery-based planning
- - build reconciliation candidates from the loaded state
- - merge reconciliation candidates with discovery candidates
- - pass the merged list to `run_planned_downloads()`
+ - `processing_status_main = discovery-in-progress`
+ - `processing_status_detail` should be short and stable, such as a compact indication that discovery is running
  
- Keep the current sequential flow intact. The main change is to how `planned_downloads` is assembled.
+ This status should be written after the collection is accepted for processing and before WASAPI enumeration begins.
  
- ### 4. Keep the existing filesystem-based skip behavior
+ ### 4. Add a status write after download planning completes
  
- Do not redesign `run_planned_downloads()` in this step beyond what is strictly needed.
+ After the code has:
  
- The current behavior is already aligned with the chosen approach:
+ - completed discovery successfully
+ - built the list of planned downloads for that collection
+ - determined whether work exists
  
- - the downloader checks `destination_path.exists()` on disk
- - if the WARC exists locally, it skips download
- - if the WARC is absent, it attempts the download
+ write a planning-complete update.
  
- That means the new reconciliation candidates can flow through the existing loop without needing a separate retry execution path.
+ Recommended behavior:
  
- ### 5. Add logging that distinguishes reconciliation candidates from discovery candidates
+ - `processing_status_main = download-planning-complete`
+ - `processing_status_detail` should summarize the planned work in a compact way
  
- Add or adjust logging so operators can see:
+ Suggested detail examples:
  
- - how many candidates came from state/disk reconciliation
- - how many came from fresh WASAPI discovery
- - how many remained after deduplication
+ - `0 files planned`
+ - `3 files planned`
+ - `15 files planned`
  
- This is important because the new guarantee depends on more than just overlap-window rediscovery, and the logs should make that visible.
+ This creates a clear separation between discovery and actual download execution.
+ 
+ ### 5. Split the post-planning path into no-op versus active download reporting
+ 
+ After planning completes, branch status handling based on whether any downloads are needed.
+ 
+ If no downloads are needed:
+ 
+ - write `processing_status_main = no-new-files-to-download`
+ - set `processing_status_detail` to a compact reason or context, consistent with the master plan
+ - then continue into the existing final summary/outcome handling
+ 
+ If one or more downloads are needed:
+ 
+ - write `processing_status_main = downloading-in-progress`
+ - set the initial `processing_status_detail` to something like `0% (0/N files)` or `starting (0/N files)`
+ - then begin the existing sequential download/fixity loop
+ 
+ The code should avoid multiple ambiguous branches that can produce inconsistent status combinations.
+ 
+ ### 6. Add a coarse progress-milestone helper for the sequential download loop
+ 
+ Add a small helper that decides whether a progress update should be written after a completed file attempt.
+ 
+ This helper should:
+ 
+ - accept total planned file count
+ - accept completed file count
+ - compute coarse milestone thresholds
+ - avoid duplicate writes for the same milestone
+ - return either no update or a compact progress-detail string
+ 
+ Recommended first-slice milestone policy:
+ 
+ - write at download start
+ - write at `20%`, `40%`, `60%`, and `80%`
+ - do not write a separate `100%` progress update if the existing final outcome write immediately follows and makes it redundant
+ 
+ Recommended detail format:
+ 
+ - `20% (3/15 files)`
+ - `40% (6/15 files)`
+ - `60% (9/15 files)`
+ 
+ Important design rule:
+ 
+ - progress should be based on completed file attempts moving through the loop, not just successful downloads
+ - this keeps progress visible even when some files fail
+ 
+ ### 7. Write progress updates from the existing sequential download loop
+ 
+ Integrate the milestone helper into the current sequential download/fixity loop with the smallest clear code change.
+ 
+ Recommended behavior:
+ 
+ - after each file attempt finishes, update loop counters
+ - ask the helper whether a new milestone has been reached
+ - if yes, send one spreadsheet status write using:
+   - `processing_status_main = downloading-in-progress`
+   - `processing_status_detail = <milestone text>`
+ 
+ This approach preserves the current execution model while adding bounded visibility.
+ 
+ ### 8. Keep final outcome writes authoritative
+ 
+ Do not redesign the existing final outcome reporting in this step unless a small adjustment is needed for consistency.
+ 
+ The current final write should remain the authoritative end-of-collection state.
+ 
+ The new intermediate writes should lead cleanly into the existing final outcomes, such as:
+ 
+ - `downloaded-without-errors`
+ - `completed-with-some-file-failures`
+ - `discovery-failed`
+ - `spreadsheet-update-failed` if the existing code already uses that path
+ 
+ The main point is to fill the visibility gap during processing, not to redesign end-state reporting.
+ 
+ ### 9. Add logging aligned with spreadsheet phase changes
+ 
+ Add or adjust log messages so they mirror the new spreadsheet phases.
+ 
+ Logs should make it easy to correlate:
+ 
+ - when discovery started
+ - when planning completed and how many files were planned
+ - when downloads began
+ - when a progress milestone was written
+ - when the final outcome was written
+ 
+ This keeps sheet visibility and log visibility aligned during debugging and cron monitoring.
  
  ---
  ## Likely Code Touch Points
  
  - `warc_tracker_script/lib/orchestration.py`
-   - add a helper to build reconciliation-based retry candidates from manifest entries
-   - add a helper to merge and deduplicate planned downloads
-   - update `process_collection_job()` to use the merged set
+   - add or consolidate bounded status constants
+   - extend the sequential collection-processing flow with intermediate status writes
+   - add a progress-milestone helper
+   - call the existing sheet-write helper at controlled points in the download loop
+ - spreadsheet-related helpers already used by orchestration
+   - only if current helper boundaries make a small refactor useful
  - `warc_tracker_script/tests/test_orchestration.py`
-   - add focused tests for reconciliation candidate creation and merged planning behavior
- - `warc_tracker_script/tests/test_collection_state.py`
-   - only if existing state-focused tests need to be expanded for malformed or partial manifest-entry cases
+   - add focused tests for phase transitions and progress-milestone behavior
+ - spreadsheet-update tests, if present elsewhere in the repo
+   - only if needed to keep status-writing behavior covered at the right layer
  
- Keep `main.py`, `downloader.py`, and `local_state.py` unchanged unless a very small supporting edit is clearly needed.
+ Keep `main.py` thin and avoid any new architectural layer unless a small helper extraction clearly reduces duplication.
  
  ---
  ## Minimum Test Coverage
  
  Add focused `unittest` coverage for:
  
- - manifest entry with missing local WARC and usable `source_url` => queued for retry
- - manifest entry with existing local WARC => not queued for retry
- - malformed manifest entry without usable `source_url` or `warc_path` => skipped safely
- - filename present in both reconciliation candidates and discovery candidates => deduplicated to one planned download
- - reconciliation-only missing file is passed into the existing sequential download flow
+ - collection processing writes `discovery-in-progress` before WASAPI enumeration begins
+ - successful planning with zero planned downloads writes `download-planning-complete` followed by `no-new-files-to-download`
+ - successful planning with one or more downloads writes `download-planning-complete` followed by `downloading-in-progress`
+ - the sequential download loop emits progress updates only at the chosen milestone boundaries
+ - progress detail text uses the expected compact format such as `40% (6/15 files)`
+ - duplicate milestone writes are not emitted when multiple completed counts fall within the same milestone bucket
+ - final outcome writes still occur and remain consistent with current success/failure behavior
  
- The tests do not need to cover spreadsheet updates or Trio behavior for this step.
+ If the existing tests mock sheet writes, prefer extending those mocks rather than introducing broader integration tests for this slice.
  
  ---
  ## Out of Scope for This Step
  
- - retry backoff or retry throttling based on `last_attempt_at`
- - verification of local file size against remote metadata
- - validation or regeneration of missing fixity sidecars for otherwise present WARC files
- - spreadsheet write/update behavior
- - Trio concurrency
- - lock/cron wrapper hardening
+ - moving sheet writes behind the future dedicated sheet-updater task
+ - implementing Trio orchestration
+ - adding per-file spreadsheet chatter
+ - changing the source-of-truth model away from local filesystem plus `state.json`
+ - redesigning download retry behavior
+ - lock or cron-wrapper hardening
+ - adding new worksheet columns beyond the required contract already described in the master plan
  
  ---
  ## Success Criteria
  
- - [ ] a manifest entry with a missing local WARC and usable `source_url` is retried in a future run even if WASAPI does not rediscover it
- - [ ] a manifest entry whose local WARC already exists is not redundantly re-downloaded
- - [ ] discovery-based planned downloads and reconciliation-based retry candidates are merged and deduplicated by filename
- - [ ] the current sequential production flow remains the main execution path
- - [ ] focused `unittest` coverage exists for reconciliation-driven retry behavior
+ - [ ] the sequential flow writes `discovery-in-progress` when collection discovery starts
+ - [ ] the sequential flow writes `download-planning-complete` after planning finishes
+ - [ ] collections with no planned downloads write `no-new-files-to-download`
+ - [ ] collections with planned downloads write `downloading-in-progress` and coarse milestone updates
+ - [ ] progress updates are bounded to stable milestone checkpoints rather than per-file chatter
+ - [ ] existing final outcome reporting still works correctly
+ - [ ] focused `unittest` coverage exists for the new intermediate status/progress behavior
  
  ---
  ## Likely Follow-Up After This Step
  
- 1. decide whether missing fixity sidecars for present WARCs should also be reconciled automatically
- 2. add optional retry throttling for repeatedly failing URLs
- 3. improve spreadsheet reporting so logs and sheet status can distinguish discovery-driven downloads from reconciliation-driven retries
+ 1. move the same phase/progress events behind the later dedicated sheet-updater task
+ 2. decide whether progress detail should be based on completed attempts or only successful downloads if operator feedback suggests a change
+ 3. add lock and cron-wrapper hardening once reporting visibility is good enough for production monitoring
+ 4. implement the later Trio architecture after the sequential event model feels stable
  
  ---
  ## Handoff Notes
@@ -198,13 +320,12 @@
  
  - `warc_tracker_script/AGENTS.md`
  - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
- - `warc_tracker_script/PLAN__suggest_retry_guarantees.md`
  - `warc_tracker_script/PLAN__next_single_step.md`
  
  Quick mental model:
  
- - this step is about **reconciling `state.json` against the filesystem**
- - `state.json` tells you what files the collection thinks it knows about
- - the filesystem tells you whether a WARC is actually present
- - if state knows about a file and disk does not have it, queue it for download
- - merge that queue with normal WASAPI discovery results and let the current sequential download loop handle the rest
+ - this step is about **making the current sequential flow more visible in the spreadsheet**
+ - the code already validates required columns and writes start/final collection updates
+ - the missing slice is the in-between reporting: discovery, planning, no-op, and coarse download progress
+ - keep the change small, bounded, and sequential
+ - do not jump ahead to Trio yet
