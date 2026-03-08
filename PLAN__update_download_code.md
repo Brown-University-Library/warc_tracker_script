@@ -23,7 +23,7 @@ This plan was written against an earlier version of the download flow. Some sugg
 ### What remains true from the earlier draft
 
 - `process_collection_job()` still advances `enumeration_checkpoint_store_time_max` immediately after successful discovery and before download attempts begin.
-- Discovered files are still not written to `state.json` until each individual download attempt occurs.
+- Planned downloads are now written to `state.json` before download attempts begin, but the code still does not persist a top-level discovery/planning summary block.
 - If a planned destination WARC already exists, `run_planned_downloads()` logs and skips it without ensuring that the manifest and fixity metadata are brought into alignment.
 - Final logging still mixes several concepts together; it reports `pending candidates`, `planned downloads`, `download successes`, `download failures`, and `skipped existing files`, but it does not durably persist a discovery/planning summary.
 - `download_to_path()` still has no bounded in-run retry behavior for transient upstream `5xx` or transport errors.
@@ -32,23 +32,24 @@ This plan was written against an earlier version of the download flow. Some sugg
 
 ### Recommendation 1: persist discovered/planned files to state before downloads begin
 
-Status: **still applicable and still high-value**.
+Status: **implemented**.
 
-Why it still matters:
+Implemented behavior:
 
-- The current manifest only becomes complete as the sequential loop progresses.
-- Mid-run inspection still cannot distinguish between `not discovered yet` and `discovered but not attempted yet`.
-- Crash recovery reasoning would be clearer if discovery/planning state were durably recorded before the first download begins.
-
-Suggested revision:
-
-- After discovery and planned-download construction, create or update manifest entries for every planned filename before calling `run_planned_downloads()`.
-- Record stable metadata when available:
+- `process_collection_job()` now persists planned download entries into `state.json` before calling `run_planned_downloads()`.
+- `lib/local_state.py` now provides a dedicated helper that records pre-download planning metadata.
+- Planned entries now record:
   - `source_url`
   - `warc_path`
-  - optional `store_time`
-  - optional planning/discovery timestamp
-- Use an explicit pre-download state such as `pending_download` rather than overloading `failed` or `downloaded`.
+  - `discovered_at`
+  - `status: pending_download` for entries that are not already `downloaded`
+- Focused `unittest` coverage now verifies both the local-state helper behavior and the orchestration save point before download attempts begin.
+
+Notes about the current implementation:
+
+- This slice intentionally does **not** move checkpoint persistence.
+- This slice intentionally does **not** add top-level discovery/planning summary fields yet.
+- This slice intentionally does **not** change `destination already exists` reconciliation behavior yet.
 
 ### Recommendation 2: persist collection-level run metadata for discovery and planning
 
@@ -161,12 +162,11 @@ However, it does **not** solve the earlier-planning visibility gap, because file
 
 If you want the smallest high-value implementation sequence now, do this:
 
-1. Persist planned/discovered manifest entries before downloads begin.
-2. Write a compact top-level discovery/planning summary into `state.json`.
-3. Move checkpoint persistence to after that durable planning-state save.
-4. Reconcile the `destination already exists` branch so manifest and fixity state stay aligned.
-5. Add bounded retries for transient download failures.
-6. Tighten logging/reporting terminology so discovery, planning, attempt, skip, download, and fixity counts are explicit.
+1. Write a compact top-level discovery/planning summary into `state.json`.
+2. Move checkpoint persistence to after that durable planning-state save.
+3. Reconcile the `destination already exists` branch so manifest and fixity state stay aligned.
+4. Add bounded retries for transient download failures.
+5. Tighten logging/reporting terminology so discovery, planning, attempt, skip, download, and fixity counts are explicit.
 
 ## Bottom line
 
@@ -180,7 +180,7 @@ But the plan needed revision because the codebase has moved forward:
 
 So the remaining work is narrower than the earlier draft implied:
 
-- persist planning state earlier
+- persist additional discovery/planning summary state beyond per-file manifest entries
 - align `already exists` handling with manifest/fixity truth
 - add bounded transient-failure retries
 - make durable and logged counts easier to interpret

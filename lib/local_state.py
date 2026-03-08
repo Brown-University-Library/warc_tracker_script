@@ -87,6 +87,27 @@ def get_file_manifest_entry(state: dict[str, object], filename: str) -> dict[str
     return result
 
 
+def update_file_manifest_for_planned_download(
+    state: dict[str, object],
+    filename: str,
+    source_url: str,
+    warc_path: Path,
+    discovered_at: str,
+) -> dict[str, object]:
+    """
+    Updates one file manifest entry with durable pre-download planning metadata.
+    """
+    entry = get_file_manifest_entry(state, filename)
+    entry['source_url'] = source_url
+    entry['warc_path'] = str(warc_path)
+    entry['discovered_at'] = discovered_at
+    current_status = entry.get('status')
+    if current_status != 'downloaded':
+        entry['status'] = 'pending_download'
+    result = entry
+    return result
+
+
 def update_file_manifest_for_download_result(
     state: dict[str, object],
     filename: str,

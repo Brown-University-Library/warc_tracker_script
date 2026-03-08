@@ -26,22 +26,22 @@ Completed so far:
 - configuration/env-var loading exists in `main.py`
 - logging is configured in `main.py` for both console output and a predictable file location at `logs/warc_tracker_script.log`
 - spreadsheet ingestion with header detection and canonical field mapping exists in `lib/collection_sheet.py`
-- per-collection local `state.json` handling exists in `lib/local_state.py`, including atomic save/load helpers and durable per-file manifest updates for download/fixity outcomes
+- per-collection local `state.json` handling exists in `lib/local_state.py`, including atomic save/load helpers, durable pre-download manifest persistence for planned files, and durable per-file manifest updates for download/fixity outcomes
 - WASAPI discovery helpers exist in `lib/wasapi_discovery.py`, including `store-time` overlap-window boundary computation, paginated record enumeration, and max `store-time` tracking
 - local WARC/fixity path-building helpers exist in `lib/storage_layout.py`, including year/month partition extraction from WARC filenames and planned destination/sidecar path construction
 - a production downloader exists in `lib/downloader.py`; it streams with `httpx`, writes to `*.partial`, removes stale partial files on retry, atomically renames successful downloads into place, and returns explicit success/failure results
 - a production fixity module exists in `lib/fixity.py`; it computes SHA-256 for downloaded WARCs, writes `.sha256` and `.json` sidecars atomically, and returns explicit success/failure results
 - a temporary investigative WASAPI metadata-capture script exists in `tmp_inspect_collection_wasapi.py`
 - focused `unittest` coverage exists for the sheet-ingestion, local-state, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
-- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, switches between first-run full historical backfill and checkpointed 30-day overlap-window discovery based on the local enumeration checkpoint, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, downloads WARC files sequentially to planned destinations, generates fixity sidecars after successful downloads, durably records per-file download/fixity outcomes in `state.json`, and logs per-collection download/fixity summaries
+- a sequential production orchestration flow exists across `main.py` and `lib/orchestration.py`; it loads active collection jobs, opens an authenticated `httpx.Client`, processes collections one at a time, switches between first-run full historical backfill and checkpointed 30-day overlap-window discovery based on the local enumeration checkpoint, runs WASAPI discovery, updates the enumeration checkpoint on successful discovery, computes planned local WARC/fixity paths for discovered filename-bearing records, extracts usable source URLs, persists planned-download manifest entries before the download loop begins, downloads WARC files sequentially to planned destinations, generates fixity sidecars after successful downloads, durably records per-file download/fixity outcomes in `state.json`, and logs per-collection download/fixity summaries
 - Archive-It credential loading and storage-root resolution exist in `lib/orchestration.py`
 - filesystem-reconciliation retry planning exists in `lib/orchestration.py`; it scans `state.json` manifest entries, queues retry candidates for files whose recorded `warc_path` is missing on disk and whose `source_url` remains usable, merges those candidates with fresh WASAPI discovery-based planned downloads, deduplicates by filename while preferring discovery candidates, and feeds the merged set into the existing sequential download/fixity loop
-- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, fixity helpers, production orchestration helpers including first-run versus checkpointed discovery behavior, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
+- focused `unittest` coverage exists for the sheet-ingestion, local-state, storage-layout helpers, downloader helpers, fixity helpers, production orchestration helpers including first-run versus checkpointed discovery behavior, pre-download manifest persistence, `main.py`, production WASAPI-discovery helpers, and temporary WASAPI-inspection helpers
 - additional focused `unittest` coverage exists for reconciliation-driven retry planning, malformed manifest-entry skipping, filename-level merge/dedup behavior, and reconciliation-only download candidates flowing through the current sequential production orchestration
 
 Not yet implemented in the production backup flow:
 
-- spreadsheet write/update behavior, including up-front validation of required reporting columns and collection-level start/final status writes
+- spreadsheet reporting expansion, including up-front validation of required reporting columns and mid-download progress updates
 - Trio orchestration with two dedicated download workers and a separate sheet updater
 - lock and cron wrapper hardening
 
@@ -590,17 +590,18 @@ Keep this minimal and practical.
 7. [x] Implement downloader with temp-file then atomic rename.
 8. [x] Implement SHA-256 sidecar writing.
 9. [x] Implement durable local manifest updates for download and fixity outcomes.
-10. [x] Add filesystem-reconciliation retry planning so missing local WARCs recorded in `state.json` are retried even when WASAPI does not rediscover them.
-11. Implement spreadsheet write/update behavior.
+10. [x] Persist planned-download manifest entries before downloads begin so discovered/planned files are durably visible in `state.json` before the sequential download loop starts.
+11. [x] Add filesystem-reconciliation retry planning so missing local WARCs recorded in `state.json` are retried even when WASAPI does not rediscover them.
+12. Implement spreadsheet write/update behavior.
    - first slice: validate required reporting columns up front and write collection-level start/final status updates from the existing sequential flow
    - later slice: add mid-download progress reporting and move sheet writes behind the dedicated sheet-updater task
-12. Implement the `Trio` flow:
+13. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
    - download worker 2
    - sheet updater
-13. Add lock and cron wrapper.
-14. Run on a small set of collections before scaling up.
+14. Add lock and cron wrapper.
+15. Run on a small set of collections before scaling up.
 
 ---
 

@@ -14,6 +14,7 @@ from lib.local_state import (
     load_collection_state,
     make_default_collection_state,
     save_collection_state,
+    update_file_manifest_for_planned_download,
 )
 
 
@@ -135,6 +136,58 @@ class TestSaveCollectionState(TestCase):
             self.assertEqual(state_file_path.name, 'state.json')
             sibling_names = {path.name for path in state_file_path.parent.iterdir()}
             self.assertEqual(sibling_names, {'state.json'})
+
+
+class TestPlannedDownloadManifestUpdates(TestCase):
+    """
+    Test cases for pre-download manifest persistence.
+    """
+
+    def test_records_pending_download_metadata_for_new_entry(self):
+        """
+        Checks that planned download metadata is persisted before any download attempt occurs.
+        """
+        state = make_default_collection_state()
+
+        result = update_file_manifest_for_planned_download(
+            state=state,
+            filename='alpha.warc.gz',
+            source_url='https://example.org/alpha.warc.gz',
+            warc_path=Path('/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz'),
+            discovered_at='2026-03-07T15:00:00+00:00',
+        )
+
+        self.assertEqual(result['status'], 'pending_download')
+        self.assertEqual(result['source_url'], 'https://example.org/alpha.warc.gz')
+        self.assertEqual(result['warc_path'], '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz')
+        self.assertEqual(result['discovered_at'], '2026-03-07T15:00:00+00:00')
+
+    def test_preserves_downloaded_status_when_refreshing_planned_metadata(self):
+        """
+        Checks that already-downloaded entries keep their downloaded status when planning metadata is refreshed.
+        """
+        state = {
+            'enumeration_checkpoint_store_time_max': None,
+            'files': {
+                'alpha.warc.gz': {
+                    'status': 'downloaded',
+                    'source_url': 'https://example.org/older-alpha.warc.gz',
+                }
+            },
+        }
+
+        result = update_file_manifest_for_planned_download(
+            state=state,
+            filename='alpha.warc.gz',
+            source_url='https://example.org/alpha.warc.gz',
+            warc_path=Path('/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz'),
+            discovered_at='2026-03-07T15:00:00+00:00',
+        )
+
+        self.assertEqual(result['status'], 'downloaded')
+        self.assertEqual(result['source_url'], 'https://example.org/alpha.warc.gz')
+        self.assertEqual(result['warc_path'], '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz')
+        self.assertEqual(result['discovered_at'], '2026-03-07T15:00:00+00:00')
 
 
 if __name__ == '__main__':

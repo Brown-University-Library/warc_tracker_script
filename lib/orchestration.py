@@ -22,6 +22,7 @@ from lib.local_state import (
     save_collection_state,
     update_file_manifest_for_download_result,
     update_file_manifest_for_fixity_result,
+    update_file_manifest_for_planned_download,
 )
 from lib.storage_layout import PlannedCollectionPaths, StorageLayoutError, plan_collection_paths
 from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collection_discovery
@@ -309,6 +310,36 @@ def save_collection_state_after_file_processing(
     """
     save_collection_state(storage_root, collection_id, state)
     log.info('Saved collection %s state after processing %s.', collection_id, filename)
+
+
+def persist_planned_downloads_to_state(
+    storage_root: Path,
+    collection_id: int,
+    state: dict[str, object],
+    planned_downloads: list[PlannedDownload],
+    discovered_at: str,
+) -> None:
+    """
+    Persists planned-download manifest entries before the download loop begins.
+    Called by: process_collection_job()
+    """
+    if not planned_downloads:
+        return
+
+    for planned_download in planned_downloads:
+        update_file_manifest_for_planned_download(
+            state=state,
+            filename=planned_download.filename,
+            source_url=planned_download.source_url,
+            warc_path=planned_download.planned_paths.warc_path,
+            discovered_at=discovered_at,
+        )
+    save_collection_state(storage_root, collection_id, state)
+    log.info(
+        'Saved collection %s state with %s planned download entries before downloads begin.',
+        collection_id,
+        len(planned_downloads),
+    )
 
 
 def run_planned_downloads(
@@ -642,6 +673,13 @@ def process_collection_job(
         len(reconciliation_planned_downloads),
         len(discovery_planned_downloads),
         len(planned_downloads),
+    )
+    persist_planned_downloads_to_state(
+        storage_root=storage_root,
+        collection_id=collection_job.collection_id,
+        state=state,
+        planned_downloads=planned_downloads,
+        discovered_at=datetime.now(UTC).isoformat(),
     )
     download_results, fixity_results = run_planned_downloads(
         client,

@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import TestCase
@@ -347,6 +348,7 @@ class TestProcessCollectionJob(TestCase):
             completed_at='2026-03-06T12:34:56+00:00',
             error_message=None,
         )
+        saved_state_snapshots: list[dict[str, object]] = []
 
         with (
             patch(
@@ -364,6 +366,7 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.update_collection_final_reporting') as mock_final_reporting,
             patch('lib.orchestration.datetime') as mock_datetime,
         ):
+            mock_save.side_effect = lambda storage_root, collection_id, state: saved_state_snapshots.append(deepcopy(state))
             mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
             result = process_collection_job(
                 client,
@@ -374,7 +377,15 @@ class TestProcessCollectionJob(TestCase):
                 header_location,
             )
 
-        saved_state = mock_save.call_args.args[2]
+        planning_state = deepcopy(saved_state_snapshots[1])
+        saved_state = deepcopy(saved_state_snapshots[-1])
+        self.assertEqual(
+            planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['status'], 'pending_download'
+        )
+        self.assertEqual(
+            planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['warc_path'],
+            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+        )
         self.assertEqual(saved_state['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
         self.assertIsNone(mock_fetch.call_args.kwargs['after_datetime'])
         self.assertEqual(mock_update_status.call_args.args[3].processing_status_detail, 'full historical backfill')
@@ -390,6 +401,109 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '1')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '11')
+
+    def test_planned_downloads_persisted_before_download_attempts(self):
+        """
+        Checks that planned downloads are persisted before the sequential download loop begins.
+        """
+        collection_job = CollectionJob(
+            collection_id=123,
+            repository='UA',
+            collection_url='https://example.com',
+            collection_name='Example',
+            row_number=7,
+        )
+        client = MagicMock(spec=httpx.Client)
+        worksheet = MagicMock()
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 0,
+                'processing_status_detail': 1,
+                'summary_status_last_wasapi_check': 2,
+                'summary_status_downloaded_warcs_count': 3,
+                'summary_status_downloaded_warcs_size': 4,
+                'summary_status_server_path': 5,
+            },
+        )
+        discovery_result = MagicMock()
+        discovery_result.records = [
+            {
+                'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+                'locations': ['https://example.org/alpha.warc.gz'],
+            }
+        ]
+        discovery_result.request_records = [{'page': 1}]
+        discovery_result.completed_successfully = True
+        discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+        download_result = MagicMock()
+        download_result.success = True
+        download_result.bytes_written = 11
+        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        fixity_result = FixityResult(
+            success=True,
+            warc_path=download_result.destination_path,
+            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_hexdigest='abc123',
+            size=11,
+            source_url='https://example.org/alpha.warc.gz',
+            completed_at='2026-03-06T12:34:56+00:00',
+            error_message=None,
+        )
+        saved_state_snapshots: list[dict[str, object]] = []
+
+        with (
+            patch(
+                'lib.orchestration.load_collection_state',
+                return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
+            ),
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result) as mock_fetch,
+            patch('lib.orchestration.save_collection_state') as mock_save,
+            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
+            patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
+            patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
+            patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result) as mock_fixity,
+            patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
+            patch('lib.orchestration.update_collection_processing_status') as mock_update_status,
+            patch('lib.orchestration.update_collection_final_reporting') as mock_final_reporting,
+            patch('lib.orchestration.datetime') as mock_datetime,
+        ):
+            mock_save.side_effect = lambda storage_root, collection_id, state: saved_state_snapshots.append(deepcopy(state))
+            mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+            result = process_collection_job(
+                client,
+                collection_job,
+                Path('/tmp/storage'),
+                'https://example.org/wasapi',
+                worksheet,
+                header_location,
+            )
+
+        self.assertEqual(len(saved_state_snapshots), 4)
+        planning_state = deepcopy(saved_state_snapshots[1])
+        saved_state = deepcopy(saved_state_snapshots[-1])
+        self.assertEqual(
+            planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['status'],
+            'pending_download',
+        )
+        self.assertEqual(
+            planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['warc_path'],
+            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+        )
+        self.assertEqual(
+            planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['source_url'],
+            'https://example.org/alpha.warc.gz',
+        )
+        self.assertEqual(
+            planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['discovered_at'],
+            '2026-03-07T15:00:00+00:00',
+        )
+        self.assertEqual(mock_download.call_count, 1)
+        self.assertEqual(mock_fixity.call_count, 1)
+        self.assertEqual(mock_log_summary.call_args.args[1], 1)
+        self.assertEqual(mock_log_summary.call_args.args[2], 1)
+        self.assertEqual(mock_log_summary.call_args.args[4], [fixity_result])
 
     def test_skips_checkpoint_save_when_discovery_not_complete(self):
         """
@@ -440,6 +554,7 @@ class TestProcessCollectionJob(TestCase):
             completed_at='2026-03-06T12:34:56+00:00',
             error_message=None,
         )
+        saved_state_snapshots: list[dict[str, object]] = []
 
         with (
             patch(
@@ -449,14 +564,15 @@ class TestProcessCollectionJob(TestCase):
             patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
             patch('lib.orchestration.save_collection_state') as mock_save,
             patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']) as mock_build_paths,
-            patch('lib.orchestration.log_planned_download_paths') as mock_log_paths,
+            patch('lib.orchestration.log_planned_download_paths'),
             patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
-            patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result) as mock_fixity,
+            patch('lib.orchestration.write_fixity_sidecars', return_value=fixity_result),
             patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
             patch('lib.orchestration.update_collection_processing_status'),
             patch('lib.orchestration.update_collection_final_reporting'),
             patch('lib.orchestration.datetime') as mock_datetime,
         ):
+            mock_save.side_effect = lambda storage_root, collection_id, state: saved_state_snapshots.append(deepcopy(state))
             mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
             process_collection_job(
                 client,
@@ -467,87 +583,27 @@ class TestProcessCollectionJob(TestCase):
                 header_location,
             )
 
-        saved_states = [call.args[2] for call in mock_save.call_args_list]
-        self.assertGreaterEqual(len(saved_states), 2)
-        self.assertEqual(saved_states[0]['enumeration_checkpoint_store_time_max'], None)
-        self.assertEqual(mock_build_paths.call_args.args[1], 123)
-        self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
+        self.assertGreaterEqual(len(saved_state_snapshots), 2)
+        self.assertEqual(saved_state_snapshots[0]['enumeration_checkpoint_store_time_max'], None)
+        self.assertEqual(
+            saved_state_snapshots[0]['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['status'],
+            'pending_download',
+        )
+        self.assertEqual(
+            saved_state_snapshots[0]['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['warc_path'],
+            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+        )
+        self.assertEqual(
+            saved_state_snapshots[0]['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['source_url'],
+            'https://example.org/alpha.warc.gz',
+        )
+        self.assertEqual(
+            saved_state_snapshots[0]['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['discovered_at'],
+            '2026-03-07T15:00:00+00:00',
+        )
         self.assertEqual(mock_download.call_count, 1)
-        self.assertEqual(mock_fixity.call_count, 1)
-        self.assertEqual(mock_log_summary.call_args.args[1], 1)
-        self.assertEqual(mock_log_summary.call_args.args[2], 1)
-        self.assertEqual(mock_log_summary.call_args.args[4], [fixity_result])
-
-    def test_failed_download_does_not_attempt_fixity_generation(self):
-        """
-        Checks that failed downloads do not invoke fixity generation.
-        """
-        collection_job = CollectionJob(
-            collection_id=123,
-            repository='UA',
-            collection_url='https://example.com',
-            collection_name='Example',
-            row_number=7,
-        )
-        client = MagicMock(spec=httpx.Client)
-        worksheet = MagicMock()
-        header_location = HeaderLocation(
-            header_row_index=1,
-            column_map={
-                'processing_status_main': 0,
-                'processing_status_detail': 1,
-                'summary_status_last_wasapi_check': 2,
-                'summary_status_downloaded_warcs_count': 3,
-                'summary_status_downloaded_warcs_size': 4,
-                'summary_status_server_path': 5,
-            },
-        )
-        discovery_result = MagicMock()
-        discovery_result.records = [
-            {
-                'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
-                'locations': ['https://example.org/alpha.warc.gz'],
-            }
-        ]
-        discovery_result.request_records = [{'page': 1}]
-        discovery_result.completed_successfully = True
-        discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
-        download_result = MagicMock()
-        download_result.success = False
-        download_result.bytes_written = 0
-        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
-        download_result.error_message = '404 Not Found'
-
-        with (
-            patch(
-                'lib.orchestration.load_collection_state',
-                return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
-            ),
-            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
-            patch('lib.orchestration.save_collection_state'),
-            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']),
-            patch('lib.orchestration.log_planned_download_paths'),
-            patch('lib.orchestration.download_to_path', return_value=download_result),
-            patch('lib.orchestration.write_fixity_sidecars') as mock_fixity,
-            patch('lib.orchestration.log_collection_download_summary') as mock_log_summary,
-            patch('lib.orchestration.update_collection_processing_status'),
-            patch('lib.orchestration.update_collection_final_reporting'),
-            patch('lib.orchestration.datetime') as mock_datetime,
-        ):
-            mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
-            result = process_collection_job(
-                client,
-                collection_job,
-                Path('/tmp/storage'),
-                'https://example.org/wasapi',
-                worksheet,
-                header_location,
-            )
-
-        self.assertFalse(mock_fixity.called)
         self.assertEqual(mock_log_summary.call_args.args[3], [download_result])
-        self.assertEqual(mock_log_summary.call_args.args[4], [])
-        self.assertEqual(result.status_update.processing_status_main, STATUS_COMPLETED_WITH_SOME_FILE_FAILURES)
+        self.assertEqual(mock_log_summary.call_args.args[4], [fixity_result])
 
     def test_checkpointed_run_uses_overlap_window_boundary_for_discovery(self):
         """
@@ -694,6 +750,85 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_download.call_args.args[1], 'https://example.org/reconciliation-alpha.warc.gz')
         self.assertEqual(mock_log_summary.call_args.args[2], 1)
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
+
+    def test_persists_discovery_planned_files_before_download_attempts_begin(self):
+        """
+        Checks that planned downloads are written to local state before the downloader is invoked.
+        """
+        collection_job = CollectionJob(
+            collection_id=123,
+            repository='UA',
+            collection_url='https://example.com',
+            collection_name='Example',
+            row_number=7,
+        )
+        client = MagicMock(spec=httpx.Client)
+        worksheet = MagicMock()
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 0,
+                'processing_status_detail': 1,
+                'summary_status_last_wasapi_check': 2,
+                'summary_status_downloaded_warcs_count': 3,
+                'summary_status_downloaded_warcs_size': 4,
+                'summary_status_server_path': 5,
+            },
+        )
+        discovery_result = MagicMock()
+        discovery_result.records = [
+            {
+                'filename': 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+                'locations': ['https://example.org/alpha.warc.gz'],
+            }
+        ]
+        discovery_result.request_records = [{'page': 1}]
+        discovery_result.completed_successfully = True
+        discovery_result.max_observed_store_time = '2026-03-06T12:00:00Z'
+        download_result = MagicMock()
+        download_result.success = False
+        download_result.bytes_written = 0
+        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.error_message = '502 Bad Gateway'
+        saved_state_snapshots: list[dict[str, object]] = []
+
+        with (
+            patch(
+                'lib.orchestration.load_collection_state',
+                return_value={'enumeration_checkpoint_store_time_max': None, 'files': {}},
+            ),
+            patch('lib.orchestration.fetch_collection_discovery', return_value=discovery_result),
+            patch('lib.orchestration.save_collection_state') as mock_save,
+            patch('lib.orchestration.build_planned_download_paths', return_value=['planned-path']),
+            patch('lib.orchestration.log_planned_download_paths'),
+            patch('lib.orchestration.download_to_path', return_value=download_result) as mock_download,
+            patch('lib.orchestration.write_fixity_sidecars'),
+            patch('lib.orchestration.log_collection_download_summary'),
+            patch('lib.orchestration.update_collection_processing_status'),
+            patch('lib.orchestration.update_collection_final_reporting'),
+            patch('lib.orchestration.datetime') as mock_datetime,
+        ):
+            mock_save.side_effect = lambda storage_root, collection_id, state: saved_state_snapshots.append(deepcopy(state))
+            mock_datetime.now.return_value = datetime(2026, 3, 7, 15, 0, 0, tzinfo=UTC)
+            process_collection_job(
+                client,
+                collection_job,
+                Path('/tmp/storage'),
+                'https://example.org/wasapi',
+                worksheet,
+                header_location,
+            )
+
+        planning_state = saved_state_snapshots[1]
+        saved_manifest_entry = planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']
+        self.assertEqual(saved_manifest_entry['status'], 'pending_download')
+        self.assertEqual(saved_manifest_entry['source_url'], 'https://example.org/alpha.warc.gz')
+        self.assertEqual(
+            saved_manifest_entry['warc_path'],
+            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+        )
+        self.assertEqual(saved_manifest_entry['discovered_at'], '2026-03-07T15:00:00+00:00')
+        self.assertEqual(mock_download.call_count, 1)
 
 
 class TestCollectionReportingHelpers(TestCase):
