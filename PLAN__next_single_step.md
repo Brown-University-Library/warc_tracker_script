@@ -219,22 +219,36 @@ Guardrails:
 
 Before editing behavior, lock down what each check means in current production terms.
 
-At minimum answer these questions from code review:
+At minimum, use these decisions from code review and user guidance:
 
-- what source of expected size is available on a planned candidate, and is it always present?
-    - USER-ANSWER: don't change whatever is occurring currently; we can always tweak this later. In a future-notes section, you can suggest one suggested improvement.
-- what makes a fixity sidecar "valid enough" for this step: existence only, parseability, checksum-content consistency, or something narrower?
-    - USER-ANSWER: to be valid-enough, a check of the file-system should contain fixity existence, parseability, and checksum-content consistency.
-- when the manifest says a prior attempt failed, what exact conditions allow retry today?
-    - USER-ANSWER: don't change whatever is occurring currently; we can always tweak this later. In a future-notes section, you can suggest one suggested improvement.
-- if the WARC exists but fixity is missing, should the file remain in `active_downloads` under the current sequential loop design?
-    - USER-ANSWER: yes, absolutely.
+- expected-size rule for this step
+  - do not redesign current size semantics during this slice
+  - use whatever expected-size information current production state already exposes cheaply and deterministically
+  - if no expected-size value is currently available for a candidate, follow the existing fallback behavior rather than inventing a new requirement
+- fixity-valid-enough rule for this step
+  - local fixity validation should include:
+    - sidecar existence
+    - parseability
+    - checksum-content consistency against the current local WARC
+- retry-after-prior-failure rule for this step
+  - do not redesign current retry-eligibility semantics during this slice
+  - preserve whatever retry behavior current production code already uses today, while making it explicit in evaluation helpers and tests
+- WARC-exists-but-fixity-missing rule for this step
+  - yes: that file must remain in `active_downloads`
+  - under the current sequential architecture, missing or invalid fixity still counts as remaining backup work
 
 Recommendation for this step:
 
 - lock the implementation to the strongest rule that is already supported by current code and tests
 - do not invent unverifiable validation requirements
 - if any ideal rule from the master plan cannot yet be enforced, document the current narrower rule in tests
+
+### Future notes
+
+- possible future size-check improvement
+  - add one explicit authoritative expected-size field to planned-download metadata so size verification does not need to infer from prior local fixity metadata when discovery data lacks that value
+- possible future retry-policy improvement
+  - replace the current implicit retry-eligibility rule with one explicit helper that considers status, last-attempt outcome, and optional retry limits in one place
 
 ### 4. Build evaluated `active_downloads` from the merged candidate list
 

@@ -2,12 +2,10 @@
 
 - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
 
-- review ``warc_tracker_script/tmp_recent_prompt.md` to understand my last evaluation-of-wasapi-discovery question.
+- review `warc_tracker_script/PLAN__next_single_step.md` for my  "USER-ANSWER" entries to section ### 3. Decide the exact MVP meaning of each evaluation check.
 
-- review `warc_tracker_script/tmp_model_answer.md` to understand your last evaluation-of-wasapi-discovery answer.
+- update the `warc_tracker_script/PLAN__next_single_step.md` to incorporate my answers.
 
-- I'm thinking that if, after wasapi-discovery, we want a true  "evaluation" to determine what we actually need to download, that evaluation-step should not just check whether the file already exists -- but perform the other important checks such as size-verification, fixity-info, etc. That way, the "filtered" list is both accurate for reporting, and accurate for the deeper backup goal.
-
-- Given this, redo your thorough implementation plan and save it to `warc_tracker_script/PLAN__next_single_step.md`, overwriting the previous file.
+- implement the `warc_tracker_script/PLAN__next_single_step.md`, ensuring all tests pass on completion.
 
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
