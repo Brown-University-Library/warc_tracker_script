@@ -1,4 +1,4 @@
-# Next Single Step: Filter Planned Downloads Before Writing Download-Start Status
+# Next Single Step: Add a True Post-Discovery Evaluation Step for Download Need
 
 ## Context for Future Agents
 
@@ -8,55 +8,60 @@
 
 - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
 
-**Recent reporting-count guidance**:
+**Recent evaluation guidance**:
 
 - `warc_tracker_script/tmp_recent_prompt.md`
 - `warc_tracker_script/tmp_model_answer.md`
 
-**Focus of this step**: implement Option 1 from `tmp_model_answer.md`.
+**Focus of this step**: after WASAPI discovery and current merge/dedup planning, add a real evaluation stage that determines whether each
+candidate still requires backup work.
 
-The goal is to make the spreadsheet-visible denominator mean **files that still require download work now**, instead of raw
-merged planned candidates that may already exist on disk by the time download-status reporting begins.
+This step is **not** just an existence-based filter. The evaluation should become the authoritative decision point for whether a file belongs
+in the active download list used for manifest persistence, spreadsheet progress counts, and the sequential download loop.
 
-This step should fit the current sequential production flow and keep `main.py` thin.
+This step should fit the current sequential production flow and keep `main.py` thin. I am also following the prior preference memory that
+you prefer building sequentially from `main.py` while keeping it orchestration-focused.
 
 ---
 
 ## Goal of This Step
 
-Add one authoritative pre-download filtering step so that, after merged planning is complete:
+Add one authoritative post-discovery evaluation stage so that, after discovery, reconciliation retry planning, and filename-level dedup are
+complete:
 
-1. the code derives a filtered download list from the broader planned-candidate list
-2. entries that already satisfy the current MVP "no download needed" rule are removed before download-start status is written
-3. the filtered list becomes the list used for:
-   - the spreadsheet-facing planned-download denominator
-   - the initial `downloading-in-progress` status
-   - mid-download progress milestones
-   - the actual sequential download loop
+1. the code evaluates each planned candidate against the local filesystem and local backup-completeness signals
+2. the code produces an `active_downloads` list containing only files that still require work
+3. the evaluated `active_downloads` list becomes the list used for:
+   - planned-download manifest persistence
+   - `download-planning-complete`
+   - `downloading-in-progress`
+   - coarse progress milestones
+   - the actual sequential download/fixity loop
 
-This step is specifically about making the **download-work denominator** feel correct and internally consistent.
+The point is to make the post-discovery list a true **needs-work evaluation result**, not merely a cosmetic reporting filter.
 
 ---
 
 ## Why This Is the Right Next Step
 
-1. **It directly addresses the reported mismatch**
-   - the recent prompt identified the operator-facing problem: a denominator such as `7` can include an item later skipped because
-     the file already exists
-   - Option 1 was chosen as the desired direction
+1. **It matches the master plan’s stated backup rule**
+   - `PLAN__simplified_warc_backup_script.md` already says a file may need work not only when the WARC is missing, but also when size
+     verification fails, fixity sidecars are missing or invalid, or a prior failed attempt should be retried
+   - the current denominator discussion now points directly at implementing that intended rule more explicitly in production
 
-2. **It is a small, bounded change to the current sequential flow**
-   - the current production orchestrator already builds merged `planned_downloads`
-   - the change is to insert one additional filtering pass before spreadsheet progress reporting and before the download loop begins
+2. **It makes reporting semantics honest**
+   - if spreadsheet-visible counts are meant to describe real remaining work, they should be driven by the same deeper evaluation that the
+     backup process itself trusts
+   - that avoids a mismatch where reporting says "no work needed" but deeper fixity or retry conditions still mean work remains
 
-3. **It improves semantics without jumping to larger redesign work**
-   - no Trio conversion is required
-   - no sheet-updater task is required
-   - no broader reporting-model rewrite is required
+3. **It improves durable state semantics**
+   - if `state.json` persists only the evaluated active-download list for this phase, durable planning state will better reflect what the run
+     truly intended to do after local evaluation
+   - broader raw discovery counts can still be logged without becoming authoritative manifest state
 
-4. **It aligns with the project plan's spreadsheet philosophy**
-   - the spreadsheet is a reporting surface, so its counts should reflect real remaining work as closely as practical
-   - the filesystem and local state remain the source of truth
+4. **It remains a bounded sequential-flow improvement**
+   - this does not require Trio or a sheet-updater task
+   - it should primarily refactor the decision point between planning and execution in the current sequential orchestrator
 
 ---
 
@@ -73,10 +78,10 @@ This step should follow these existing constraints:
 
 Interpretation for this step:
 
-- do not redesign the overall planning pipeline
-- do not introduce fuzzy spreadsheet wording as the primary fix
-- do define one explicit helper or decision point for "still requires download work now"
-- do keep the loop-level defensive skip behavior if it currently protects against small race windows
+- do not redesign the overall WASAPI discovery path
+- do not use wording-only fixes as a substitute for better evaluation logic
+- do define one explicit evaluation helper or helper family for "still requires backup work now"
+- do keep cheap defensive loop checks even after the new evaluation stage exists
 
 ---
 
@@ -84,208 +89,234 @@ Interpretation for this step:
 
 Use this exact policy as the implementation target.
 
-### 1. Keep raw merged planning available conceptually
+### 1. Keep raw discovery and merge behavior conceptually separate from evaluated download need
 
-The code may continue to build the broader merged planned-candidate list exactly as it does now.
+The current broader candidate-building flow may continue to do what it already does:
 
-That broader list still serves an internal planning purpose, including combining:
+- WASAPI discovery-driven candidate creation
+- reconciliation/retry candidate creation from `state.json`
+- filename-level merge/dedup behavior
 
-- discovery-driven candidates
-- reconciliation/retry candidates
-- filename-level dedup behavior already present in the orchestrator
+But that broader merged candidate list should no longer be treated as the authoritative answer to "what still needs download work?"
 
-This step does **not** require redefining the earlier planning merge itself.
+Instead, authoritative download need should be determined by a later evaluation stage.
 
-### 2. Add a new filtering stage before download-start reporting
+### 2. Add a true evaluation stage before manifest persistence and download-start reporting
 
-After merged planning completes, do one pass that derives a narrower list containing only entries that still require download work
-at that moment.
+After merged planning completes, evaluate each candidate against the current local state of the collection.
 
-That filtered list should become the authoritative list for download-status reporting and loop execution.
+This evaluation should determine whether the candidate:
 
-### 3. Minimum MVP filtering rule for this step
+- needs download work
+- needs fixity/verification repair work that should still flow through the existing download/fixity path
+- or is already fully satisfied locally and should be excluded from active download work
 
-The recent reporting-count question focused specifically on the case where a destination WARC already exists on disk.
+The result should be an evaluated `active_downloads` list.
 
-Minimum implementation target:
+### 3. Minimum evaluation dimensions for this step
 
-- remove a planned item from the active download list when its destination WARC path already exists on disk
+The project plan already names the important dimensions. The new evaluation stage should review and align with the current production data
+available for these checks:
 
-Important caveat from the master plan:
+- whether the local WARC file exists
+- whether local size verification passes or fails when the needed size information is available
+- whether required SHA-256/fixity sidecars exist and are valid enough for the current production rule
+- whether the manifest indicates a prior failed attempt whose retry remains allowed
 
-- the longer-term project meaning of "needs download" can also involve fixity or verification concerns
-- this step should review the current code's actual behavior carefully before broadening the filter beyond existence checks
+This does **not** necessarily mean inventing brand-new deep validation rules. It does mean the step should explicitly review how much of each
+dimension the current code can already evaluate cheaply and deterministically.
 
 Recommendation for this step:
 
-- match the current sequential loop's real skip behavior first
-- if the loop currently skips purely on WARC existence, make the new pre-download filter use that same rule
-- do **not** silently broaden the rule to include new fixity-validation logic unless the current production code already relies on it
+- make the evaluation rule as deep as current production metadata and helpers reasonably support
+- avoid speculative or expensive validation beyond what the repository already models clearly
+- if one of the plan’s ideal checks is not currently implementable from available data, document that limitation in code/tests and keep the
+  rule explicit rather than implicit
 
-### 4. Keep one consistent denominator after filtering
+### 4. Choose evaluated active downloads as the authoritative planned-download list for this phase
 
-Once the filtered list is built, use its length consistently for all spreadsheet-visible download-progress counts in this collection run.
+For this step, Option B should be treated as the target design:
+
+- persist planned-download manifest entries only for the evaluated `active_downloads` list
+- do not persist the broader pre-evaluation merged candidate list as if it were authoritative planned-download state
+
+The broader discovery/merge counts may still be logged for observability.
+
+This means the evaluated list is not just a filter layered on reporting. It is the authoritative run-intent list for this stage of the
+sequential production flow.
+
+### 5. Keep one consistent spreadsheet-facing denominator after evaluation
+
+Once `active_downloads` is built from the full evaluation stage, use its length consistently for spreadsheet-visible progress counts.
 
 Specifically:
 
-- `download-planning-complete` detail should reflect the filtered count if that status currently reports a file count
-- the initial `downloading-in-progress` detail should use the filtered count
-- coarse progress milestones should use the filtered count as their denominator
-- final success/failure summaries should remain consistent with the filtered loop input and current final-reporting semantics
+- `download-planning-complete` should reflect the evaluated active-download count if it reports a file count
+- the initial `downloading-in-progress` status should use the evaluated count
+- coarse progress milestones should use the evaluated count as their denominator
+- no-new-work cases should flow from the evaluated result, not the broader raw merged candidate list
 
-If any earlier planning-stage status currently exposes the broader raw candidate count, either:
+### 6. Preserve defensive execution behavior
 
-- update it to the filtered count for consistency, or
-- deliberately leave it unchanged only if the wording makes the distinction explicit
+Even after the new evaluation stage, keep cheap defensive checks in the sequential loop where they protect against timing windows or local
+changes between evaluation and execution.
 
-For this step, the preferred outcome is **one consistent spreadsheet-facing meaning**.
-
-### 5. Preserve defensive loop behavior
-
-Even after filtering, keep the loop-level defensive check if it currently skips existing destination files.
-
-Reason:
-
-- the new filter improves the denominator
-- the loop-level guard still protects against small timing windows or unexpected local changes between filtering and execution
-
-### 6. Manifest behavior should remain deliberate
-
-This step must review how planned-download manifest entries are currently persisted before downloads begin.
-
-Key question to answer during implementation:
-
-- should entries removed by the new active-download filter still be persisted as planned in `state.json`, or should manifest persistence move to
-  after filtering so only true active downloads are recorded for this phase?
-
-Recommendation for this step:
-
-- do not change manifest semantics casually
-- first inspect what current tests and state-writing behavior assume
-- if persistence currently happens before filtering, decide explicitly whether that remains acceptable or whether it creates the same
-  denominator confusion in durable state
-
-The code change should make this choice explicit and tested.
+The evaluation should become the primary decision point, but the loop may still defensively skip or re-handle edge cases.
 
 ---
 
 ## Specific Implementation Plan
 
-### 1. Review the current sequential planning-to-download path
+### 1. Review the current planning-to-execution path in `lib/orchestration.py`
 
-Inspect the current orchestration flow to confirm:
+Inspect the current sequential flow to confirm:
 
-- where discovery candidates are merged with reconciliation/retry candidates
-- where planned-download manifest entries are persisted
-- where `download-planning-complete` status is written
-- where `downloading-in-progress` and milestone statuses are written
-- where the sequential loop currently skips already-existing destination WARCs
+- where WASAPI-discovered records become planned candidates
+- where reconciliation/retry candidates are added
+- where merged planned downloads are deduplicated
+- what metadata is available on each planned item for local evaluation
+- where planned-download manifest entries are currently persisted
+- where `download-planning-complete`, `downloading-in-progress`, and milestone statuses are written
+- what the current download loop does when a destination WARC already exists or when other local-state anomalies are encountered
 
 Expected outcome of this review:
 
-- identify one narrow insertion point for the new filter
-- confirm the existing operational meaning of "skip because already present"
-- avoid duplicating logic in multiple places
+- identify one narrow insertion point for the new evaluation stage
+- identify the current data available for size and fixity-related checks
+- avoid duplicating logic across evaluation, reporting, and loop execution
 
-### 2. Identify or create one helper for active-download eligibility
+### 2. Identify or create one explicit helper surface for local backup-need evaluation
 
-Add a focused helper with a meaning like:
+Add a focused helper or helper family with a meaning like:
 
-- planned item still requires download work now
+- planned candidate still requires backup work now
 
-Recommended helper responsibilities:
+Recommended responsibilities:
 
-- accept one planned-download item
-- inspect the current destination WARC path and any already-existing fields needed for the decision
-- return whether the item belongs in the active download list
+- accept one planned-download candidate plus the local paths/manifest data needed for evaluation
+- determine whether the file is already locally complete enough to skip
+- determine whether a missing/invalid local artifact means work is still needed
+- return a clear evaluation result rather than only a boolean when useful
+
+Recommended result shape:
+
+- `needs_work: bool`
+- a bounded reason/value such as:
+  - `missing_warc`
+  - `size_mismatch`
+  - `missing_fixity`
+  - `invalid_fixity`
+  - `retry_after_prior_failure`
+  - `already_complete`
 
 Guardrails:
 
-- keep the helper small and explicit
-- prefer a pure-ish helper around local path checks where practical
-- avoid combining it with spreadsheet status formatting
-- avoid embedding this logic directly inside `main.py`
+- keep this logic out of `main.py`
+- keep the evaluation helper separate from spreadsheet status formatting
+- keep the reason vocabulary explicit and bounded
 
-### 3. Derive `active_downloads` from the merged planned list
+### 3. Decide the exact MVP meaning of each evaluation check
 
-After merged planning is complete, derive a filtered list such as `active_downloads`.
+Before editing behavior, lock down what each check means in current production terms.
 
-Recommended behavior:
+At minimum answer these questions from code review:
 
-- preserve the existing ordering of planned items
-- filter by the new helper
-- optionally record how many items were excluded because they were already present
-
-That filtered list should become the main input to the subsequent download-reporting path.
-
-### 4. Decide the interaction with manifest persistence
-
-This is the most important design choice in the step.
-
-Evaluate the two concrete options against existing code and tests:
-
-- **Option A:** persist the broader planned list, then filter to `active_downloads` only for reporting and loop execution
-- **Option B:** filter first, then persist only `active_downloads` as planned-download manifest entries
+- what source of expected size is available on a planned candidate, and is it always present?
+- what makes a fixity sidecar "valid enough" for this step: existence only, parseability, checksum-content consistency, or something narrower?
+- when the manifest says a prior attempt failed, what exact conditions allow retry today?
+- if the WARC exists but fixity is missing, should the file remain in `active_downloads` under the current sequential loop design?
 
 Recommendation for this step:
 
-- prefer the option that keeps durable state and spreadsheet-visible counts aligned, unless existing recovery semantics clearly rely on the
-  broader pre-filter persistence
-- if the broader persistence is retained, document in code/tests why that distinction is intentional
+- lock the implementation to the strongest rule that is already supported by current code and tests
+- do not invent unverifiable validation requirements
+- if any ideal rule from the master plan cannot yet be enforced, document the current narrower rule in tests
 
-Whichever option is chosen, add tests that lock in the intended semantics.
+### 4. Build evaluated `active_downloads` from the merged candidate list
 
-### 5. Update spreadsheet status writes to use the filtered denominator
+After merged planning completes, evaluate every candidate and build `active_downloads` from only those items whose evaluation says work is
+still needed.
 
-Adjust the collection-level reporting path so the count visible to operators reflects `active_downloads`, not the broader raw planned list.
+Recommended behavior:
+
+- preserve existing candidate ordering
+- preserve existing filename-level dedup outcomes before evaluation
+- optionally accumulate summary counts by evaluation reason for logging
+
+This evaluated list should become the main input to the remainder of the collection-processing path.
+
+### 5. Move planned-download manifest persistence to after evaluation
+
+This is now the chosen design for the step.
+
+Implement Option B explicitly:
+
+- persist planned-download manifest entries only for evaluated `active_downloads`
+- do not persist the broader raw merged list as planned-download state for this phase
+
+Recommended complementary behavior:
+
+- log raw merged planned count
+- log evaluated active-download count
+- log summary exclusion reasons such as already-complete or missing-fixity-driven inclusion
+
+This preserves observability without diluting durable manifest meaning.
+
+### 6. Update spreadsheet status writes to use the evaluated denominator
+
+Adjust the collection-level reporting path so spreadsheet-visible counts reflect the evaluated `active_downloads` list.
 
 At minimum verify and update, if needed:
 
 - `download-planning-complete`
-- the initial `downloading-in-progress`
+- `downloading-in-progress`
 - coarse `20%`/`40%`/`60%`/`80%` milestone calculations
-- any detail text that currently embeds planned counts
+- `no-new-files-to-download`
 
-If useful, include compact wording for excluded items only if that can be done without destabilizing current status text conventions.
+If current status detail text includes file counts, those counts should now refer to evaluated active work, not raw discovered candidates.
 
-The primary goal is the denominator fix, not a wording redesign.
+### 7. Run the existing sequential download/fixity path over evaluated `active_downloads`
 
-### 6. Run the sequential download loop over `active_downloads`
+Change the actual loop input so it iterates over the evaluated active-work list.
 
-Change the actual loop input so it iterates over the filtered list.
+Important design note:
 
-Expected results:
+- if the evaluation decides that missing/invalid fixity means work remains, verify whether the current sequential loop can satisfy that work
+  as-is or whether the loop assumes downloading is always needed first
 
-- fewer no-op entries enter the loop
-- progress counts line up with actual attempted download work
-- existing defensive skip behavior remains as a backstop rather than the first place the item is excluded
+If current production code cannot repair some non-download-only condition without re-downloading, document that explicitly and keep behavior
+aligned with the current production path rather than inventing a partially implemented branch.
 
-### 7. Add focused tests around the new count semantics
+### 8. Add focused tests around the evaluation semantics
 
-Add or extend `unittest` coverage for the reporting-count behavior.
+Add or extend `unittest` coverage for the new authoritative evaluation step.
 
 Minimum happy paths:
 
-- when one merged planned item already exists on disk, the active-download denominator excludes it before `downloading-in-progress` is written
-- the sequential loop runs only over the filtered active-download list
+- a missing WARC stays in `active_downloads`
+- a fully complete local file is excluded from `active_downloads`
+- a file with missing fixity remains in `active_downloads` if the chosen current-rule semantics say it still needs work
+- a retry-eligible prior failure remains in `active_downloads`
 
-Minimum failure/edge paths:
+Minimum edge/failure paths:
 
-- when no planned items are filtered out, existing behavior remains unchanged
-- duplicate or reconciliation-derived candidates that survive merging but point to existing WARCs are excluded consistently
-- the loop-level guard still tolerates a file appearing after filtering but before actual download execution
-- manifest persistence behavior is covered according to the explicit design choice from step 4
+- a file with size mismatch remains in `active_downloads` when expected size metadata is available
+- missing expected-size metadata follows the explicitly chosen fallback rule
+- evaluated active-download count drives `download-planning-complete` and `downloading-in-progress`
+- only evaluated `active_downloads` are persisted as planned-download manifest entries
+- defensive loop checks still tolerate a local file appearing after evaluation but before execution
 
-### 8. Keep logging targeted and operator-friendly
+### 9. Keep logging targeted and diagnostic
 
 Recommended logs:
 
-- raw merged planned count
-- filtered active-download count
-- how many items were excluded because they already existed on disk
-- confirmation that download-status reporting is using the filtered count
+- raw merged candidate count
+- evaluated active-download count
+- excluded already-complete count
+- included-by-reason counts such as missing WARC, size mismatch, missing fixity, invalid fixity, retry after failure
+- confirmation that manifest persistence and progress reporting use evaluated active downloads
 
-Avoid noisy per-file logs unless a failure case needs them.
+Avoid noisy per-file logging except where current failure diagnostics already expect it.
 
 ---
 
@@ -294,17 +325,19 @@ Avoid noisy per-file logs unless a failure case needs them.
 - `warc_tracker_script/main.py`
   - only for thin orchestration wiring if needed
 - `warc_tracker_script/lib/orchestration.py`
-  - likely primary location for the new filter insertion, reporting-count updates, and loop input change
+  - likely primary location for inserting the evaluation stage, moving manifest persistence, and updating reporting counts
 - `warc_tracker_script/lib/local_state.py`
-  - only if manifest persistence semantics need a small additive helper or adjustment
+  - possibly for manifest inspection helpers or additive state-evaluation helpers
+- `warc_tracker_script/lib/fixity.py`
+  - only if the cleanest fixity-sidecar validation logic already belongs there or should be exposed from there
 - `warc_tracker_script/lib/storage_layout.py`
-  - only if path access helpers are the cleanest place to support eligibility checks
+  - only if local path derivation/access helpers need a narrow addition
 - `warc_tracker_script/tests/test_orchestration.py`
-  - likely primary location for count-semantics and loop-input tests
-- related state or reporting tests
-  - only if existing persistence/reporting assumptions need to be updated narrowly
+  - likely primary location for evaluation-semantics, persistence-order, and reporting-count tests
+- related local-state or fixity tests
+  - only if helper-level evaluation logic is split into narrower units
 
-Keep business logic out of `main.py` and avoid using spreadsheet wording alone as the fix.
+Keep business logic out of `main.py` and keep the evaluation rule explicit.
 
 ---
 
@@ -312,12 +345,14 @@ Keep business logic out of `main.py` and avoid using spreadsheet wording alone a
 
 Add focused `unittest` coverage for:
 
-- a planned item whose destination WARC already exists being removed before `downloading-in-progress` status is written
-- progress denominators using the filtered active-download count rather than the broader merged planned count
-- the actual sequential download loop iterating over the filtered list
-- no-filter cases preserving current counts and behavior
-- manifest-persistence semantics matching the chosen design
-- the loop-level defensive existence guard remaining intact as a backstop
+- missing-WARC candidates being retained in evaluated active work
+- already-complete files being excluded from evaluated active work
+- missing or invalid fixity artifacts affecting evaluated active work according to the chosen current-rule semantics
+- size mismatch affecting evaluated active work when expected-size metadata exists
+- retry-eligible prior failures being retained in evaluated active work
+- planned-download manifest persistence happening after evaluation and only for `active_downloads`
+- spreadsheet progress denominators using evaluated active-download counts rather than raw merged candidate counts
+- loop-level defensive guards remaining intact after the new evaluation step
 
 If current tests already cover the planning/reporting sequence, extend those tests rather than creating heavier new integration tests unless
 necessary.
@@ -326,32 +361,32 @@ necessary.
 
 ## Out of Scope for This Step
 
-- redesigning all spreadsheet wording
-- implementing full fixity-based or verification-based "needs work" reconciliation beyond the current production rule
+- redesigning the overall WASAPI discovery mechanism
+- inventing new remote checksum-comparison behavior
 - Trio orchestration with download workers
 - moving sheet writes behind the future dedicated sheet-updater task
-- changing final summary fields that report on-disk collection totals
-- broader state-model redesign beyond the specific manifest-persistence decision required for this step
+- broader database/state redesign beyond the specific persistence-order and evaluation semantics for this step
+- large-scale wording redesign for spreadsheet statuses beyond making counts semantically correct
 
 ---
 
 ## Success Criteria
 
 - [ ] merged planning still occurs using the current discovery/reconciliation flow
-- [ ] a new pre-download filter derives an authoritative active-download list before download-start status is written
-- [ ] already-present destination WARCs are excluded from the spreadsheet-visible denominator for download progress
-- [ ] the sequential loop runs over the filtered active-download list
-- [ ] spreadsheet progress counts remain internally consistent from download start through milestones
-- [ ] manifest-persistence semantics are explicitly chosen and covered by tests
-- [ ] focused `unittest` coverage exists for at least one happy path and one edge/race-style path
+- [ ] a new explicit post-discovery evaluation stage determines whether each candidate still requires backup work
+- [ ] the evaluation uses current-production-meaningful checks for WARC existence, size/fixity availability where supported, and retry status
+- [ ] only evaluated `active_downloads` are persisted as planned-download manifest entries for this phase
+- [ ] spreadsheet progress counts use the evaluated active-download denominator
+- [ ] the sequential loop runs over evaluated `active_downloads`
+- [ ] focused `unittest` coverage exists for at least one happy path and one edge case in each major evaluation category
 
 ---
 
 ## Likely Follow-Up After This Step
 
-1. decide whether the active-download eligibility helper should later expand beyond plain WARC existence to cover missing/invalid fixity artifacts
-2. evaluate whether spreadsheet detail text should explicitly mention excluded already-present files when that count is non-zero
-3. use the same active-work semantics when the project later moves to the Trio-based worker flow
+1. decide whether any fixity-repair conditions should eventually be handled without re-downloading when the current sequential architecture allows it
+2. decide whether spreadsheet detail text should expose exclusion and inclusion reasons in compact form
+3. reuse the same evaluation semantics when the project later moves to the Trio-based worker architecture
 
 ---
 
@@ -367,8 +402,8 @@ If you pick this up in a new session, re-read:
 
 Quick mental model:
 
-- this step is about **making the visible download denominator match real remaining download work**
-- keep the current sequential flow intact
-- insert one new authoritative filter between merged planning and download-status reporting
-- make the filtered list drive both progress reporting and the actual loop
-- treat manifest persistence as an explicit design choice, not an accident
+- this step is about **making post-discovery planning become a true evaluation of backup need**
+- raw discovery/merge output is no longer the final answer
+- evaluated `active_downloads` should drive persistence, reporting, and execution
+- durable state should reflect true run intent after local evaluation
+- keep the rule explicit, testable, and aligned with what current production code can actually verify
