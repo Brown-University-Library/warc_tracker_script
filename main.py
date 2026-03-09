@@ -10,9 +10,12 @@ from lib.collection_sheet import CollectionSheetContractError, load_collection_s
 from lib.orchestration import (
     STATUS_DISCOVERY_FAILED,
     STATUS_SPREADSHEET_UPDATE_FAILED,
+    RunCoordinationError,
     build_collection_failure_report,
+    enforce_startup_run_coordination,
     get_archive_it_credentials,
     get_downloaded_storage_root,
+    get_run_coordination_mode,
     process_collection_job,
     write_collection_final_report,
 )
@@ -59,6 +62,13 @@ def run_collection_orchestration(
     collection_jobs = sheet_context.collection_jobs
     worksheet = sheet_context.worksheet
     header_location = sheet_context.header_location
+    coordination_mode = get_run_coordination_mode()
+    enforce_startup_run_coordination(
+        coordination_mode,
+        sheet_context.values,
+        header_location,
+        collection_jobs,
+    )
     log.debug('active collections found, ``%s``', collection_jobs)
 
     timeout = httpx.Timeout(30.0, connect=30.0)
@@ -139,6 +149,8 @@ def main() -> None:
         run_collection_orchestration(spreadsheet_id, downloaded_storage_root, wasapi_base_url, archive_it_credentials)
     except CollectionSheetContractError:
         log.exception('Collection worksheet reporting contract validation failed.')
+    except RunCoordinationError:
+        log.exception('Startup run coordination preflight refused to begin processing.')
     log.info('processing complete')
     return None
 

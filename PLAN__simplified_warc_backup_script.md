@@ -42,12 +42,14 @@ Completed so far:
 - focused `unittest` coverage now exists for the sequential spreadsheet phase transition ordering and coarse download-progress milestone behavior
 - the final collection-level spreadsheet summary flow now computes `summary_status_downloaded_warcs_count` and `summary_status_downloaded_warcs_size` from the collection's on-disk downloaded WARCs, so summary values reflect collection totals after processing completes rather than only current-run successes
 - focused `unittest` coverage now exists for cumulative on-disk final summary totals, including no-op collections that still report existing downloaded totals
+- a startup spreadsheet-status coordination preflight now exists for non-`cron_locked` runs; it inspects the active collection-job worksheet rows before processing begins, blocks startup when explicit in-progress `processing_status_main` values are present, and skips this soft guard only when `RUN_COORDINATION_MODE=cron_locked`
+- focused `unittest` coverage now exists for coordination-mode parsing, non-`cron_locked` startup blocking/allow behavior, and the guarantee that coordination refusal happens before HTTP client creation or per-collection processing begins
 
 Not yet implemented in the production backup flow:
 
 - Trio orchestration with two dedicated download workers and a separate sheet updater
 - moving spreadsheet writes behind the later dedicated sheet-updater task
-- lock and cron wrapper hardening
+- the actual cron wrapper / `flock` hard-lock path for scheduled runs and any remaining lock-wrapper hardening beyond the current startup spreadsheet preflight
 
 ---
 
@@ -588,9 +590,9 @@ Keep this minimal and practical.
 2. [x] Implement spreadsheet ingestion with header detection and canonical field mapping.
 3. [x] Implement per-collection local `state.json`.
 4. [x] Update WASAPI discovery and orchestration so a collection with no checkpoint performs a full historical backfill, while
-    checkpointed collections continue to use `store-time` plus a 30-day overlap.
+     checkpointed collections continue to use `store-time` plus a 30-day overlap.
 5. [x] Integrate the first-run full-backfill behavior into the current sequential production orchestration flow and verify that
-    the checkpoint is written after successful historical enumeration.
+     the checkpoint is written after successful historical enumeration.
 6. [x] Implement local path building using the year/month collection layout.
 7. [x] Implement downloader with temp-file then atomic rename.
 8. [x] Implement SHA-256 sidecar writing.
@@ -598,17 +600,19 @@ Keep this minimal and practical.
 10. [x] Persist planned-download manifest entries before downloads begin so discovered/planned files are durably visible in `state.json` before the sequential download loop starts.
 11. [x] Add filesystem-reconciliation retry planning so missing local WARCs recorded in `state.json` are retried even when WASAPI does not rediscover them.
 12. Expand spreadsheet write/update behavior.
-   - [x] validate required reporting columns up front
-   - [x] write collection-level start/final status updates from the existing sequential flow
-   - [x] add richer sequential phase/status reporting and mid-download progress reporting
-   - [x] make final downloaded-WARC count/size summary fields report collection totals from on-disk WARCs
-   - next slice: move sheet writes behind the dedicated sheet-updater task
+    - [x] validate required reporting columns up front
+    - [x] write collection-level start/final status updates from the existing sequential flow
+    - [x] add richer sequential phase/status reporting and mid-download progress reporting
+    - [x] make final downloaded-WARC count/size summary fields report collection totals from on-disk WARCs
+    - next slice: move sheet writes behind the dedicated sheet-updater task
 13. Add lock and cron wrapper.
+    - [x] add startup spreadsheet-status coordination preflight for non-`cron_locked` runs
+    - next slice: implement the actual cron wrapper / `flock` hard-lock path for scheduled runs
 14. Implement the `Trio` flow:
-   - main orchestrator
-   - download worker 1
-   - download worker 2
-   - sheet updater
+    - main orchestrator
+    - download worker 1
+    - download worker 2
+    - sheet updater
 15. Run on a small set of collections before scaling up.
 
 ---

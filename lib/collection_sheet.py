@@ -80,6 +80,7 @@ class CollectionSheetContext:
 
     worksheet: gspread.Worksheet
     header_location: HeaderLocation
+    values: list[list[str]]
     collection_jobs: list[CollectionJob]
 
 
@@ -290,6 +291,7 @@ def load_collection_sheet_context(spreadsheet_id: str) -> CollectionSheetContext
     result = CollectionSheetContext(
         worksheet=worksheet,
         header_location=header_location,
+        values=values,
         collection_jobs=collection_jobs,
     )
     return result

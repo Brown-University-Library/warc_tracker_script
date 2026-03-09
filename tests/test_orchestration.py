@@ -14,8 +14,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 from lib.collection_sheet import CollectionJob, HeaderLocation
 from lib.fixity import FixityResult
 from lib.orchestration import (
+    BLOCKING_COORDINATION_STATUSES,
     DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN,
     DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW,
+    RUN_COORDINATION_MODE_CRON_LOCKED,
     STATUS_COMPLETED_WITH_SOME_FILE_FAILURES,
     STATUS_DISCOVERY_IN_PROGRESS,
     STATUS_DOWNLOADED_WITHOUT_ERRORS,
@@ -23,6 +25,7 @@ from lib.orchestration import (
     STATUS_DOWNLOAD_PLANNING_COMPLETE,
     STATUS_NO_NEW_FILES_TO_DOWNLOAD,
     PlannedDownload,
+    RunCoordinationError,
     build_collection_failure_report,
     build_collection_final_report,
     build_download_progress_detail,
@@ -31,13 +34,17 @@ from lib.orchestration import (
     build_reconciliation_retry_downloads,
     count_pending_download_candidates,
     determine_collection_discovery_mode,
+    enforce_startup_run_coordination,
     get_archive_it_credentials,
+    get_blocking_coordination_summary,
     get_download_progress_milestone_update,
     get_downloaded_storage_root,
     get_record_source_url,
+    get_run_coordination_mode,
     merge_planned_downloads,
     process_collection_job,
     run_planned_downloads,
+    should_skip_spreadsheet_coordination_check,
 )
 
 
@@ -85,6 +92,108 @@ class TestGetArchiveItCredentials(TestCase):
             result = get_archive_it_credentials()
 
         self.assertIsNone(result)
+
+
+class TestRunCoordinationHelpers(TestCase):
+    """
+    Test cases for startup run coordination helpers.
+    """
+
+    def test_get_run_coordination_mode_returns_exact_non_blank_value(self):
+        """
+        Checks that coordination mode returns the configured non-blank string.
+        """
+        with patch.dict(os.environ, {'RUN_COORDINATION_MODE': RUN_COORDINATION_MODE_CRON_LOCKED}, clear=True):
+            result = get_run_coordination_mode()
+
+        self.assertEqual(result, RUN_COORDINATION_MODE_CRON_LOCKED)
+
+    def test_should_skip_spreadsheet_coordination_check_only_for_exact_cron_locked(self):
+        """
+        Checks that only the exact cron_locked mode skips spreadsheet coordination preflight.
+        """
+        self.assertTrue(should_skip_spreadsheet_coordination_check(RUN_COORDINATION_MODE_CRON_LOCKED))
+        self.assertFalse(should_skip_spreadsheet_coordination_check('manual'))
+        self.assertFalse(should_skip_spreadsheet_coordination_check(None))
+
+    def test_get_blocking_coordination_summary_returns_none_for_blank_and_unknown_statuses(self):
+        """
+        Checks that blank and unrecognized spreadsheet statuses do not block startup.
+        """
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 1,
+                'processing_status_detail': 2,
+            },
+        )
+        values = [
+            ['Collection ID', 'processing_status_main', 'processing_status_detail'],
+            ['123', '', ''],
+            ['456', 'unexpected-status', ''],
+        ]
+        collection_jobs = [
+            CollectionJob(123, 'UA', 'https://example.com/123', 'Alpha', 2),
+            CollectionJob(456, 'UA', 'https://example.com/456', 'Beta', 3),
+        ]
+
+        result = get_blocking_coordination_summary(values, header_location, collection_jobs)
+
+        self.assertIsNone(result)
+
+    def test_enforce_startup_run_coordination_blocks_non_cron_locked_active_status(self):
+        """
+        Checks that a non-cron_locked run is refused when an active in-progress spreadsheet status is present.
+        """
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 1,
+                'processing_status_detail': 2,
+            },
+        )
+        values = [
+            ['Collection ID', 'processing_status_main', 'processing_status_detail'],
+            ['123', STATUS_DISCOVERY_IN_PROGRESS, 'full historical backfill'],
+            ['456', 'completed-with-some-file-failures', ''],
+        ]
+        collection_jobs = [
+            CollectionJob(123, 'UA', 'https://example.com/123', 'Alpha', 2),
+            CollectionJob(456, 'UA', 'https://example.com/456', 'Beta', 3),
+        ]
+
+        with self.assertRaises(RunCoordinationError) as exc_context:
+            enforce_startup_run_coordination('manual', values, header_location, collection_jobs)
+
+        self.assertIn('Non-cron_locked runs must not start', str(exc_context.exception))
+        self.assertIn(STATUS_DISCOVERY_IN_PROGRESS, str(exc_context.exception))
+        self.assertIn('123', str(exc_context.exception))
+
+    def test_enforce_startup_run_coordination_skips_blocking_check_for_cron_locked(self):
+        """
+        Checks that cron_locked mode bypasses spreadsheet blocking statuses.
+        """
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'processing_status_main': 1,
+                'processing_status_detail': 2,
+            },
+        )
+        values = [
+            ['Collection ID', 'processing_status_main', 'processing_status_detail'],
+            ['123', STATUS_DOWNLOADING_IN_PROGRESS, '40% (2/5 files)'],
+        ]
+        collection_jobs = [CollectionJob(123, 'UA', 'https://example.com/123', 'Alpha', 2)]
+
+        result = enforce_startup_run_coordination(
+            RUN_COORDINATION_MODE_CRON_LOCKED, values, header_location, collection_jobs
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            BLOCKING_COORDINATION_STATUSES, frozenset((STATUS_DISCOVERY_IN_PROGRESS, STATUS_DOWNLOADING_IN_PROGRESS))
+        )
 
 
 class TestCountPendingDownloadCandidates(TestCase):

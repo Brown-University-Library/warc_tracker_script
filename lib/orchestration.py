@@ -43,7 +43,31 @@ STATUS_SPREADSHEET_UPDATE_FAILED = 'spreadsheet-update-failed'
 DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN = 'full-backfill-first-run'
 DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW = 'incremental-overlap-window'
 
+RUN_COORDINATION_MODE_CRON_LOCKED = 'cron_locked'
+BLOCKING_COORDINATION_STATUSES = frozenset(
+    (
+        STATUS_DISCOVERY_IN_PROGRESS,
+        STATUS_DOWNLOADING_IN_PROGRESS,
+    )
+)
+
 DOWNLOAD_PROGRESS_MILESTONES = (20, 40, 60, 80)
+
+
+class RunCoordinationError(RuntimeError):
+    """
+    Indicates that startup coordination policy refused to begin a non-cron_locked run.
+    """
+
+
+@dataclass(frozen=True)
+class BlockingCoordinationSummary:
+    """
+    Represents blocking in-progress spreadsheet statuses found during startup preflight.
+    """
+
+    blocking_collection_ids: list[int]
+    blocking_statuses: list[str]
 
 
 def format_downloaded_size_gb(size_bytes: int) -> str:
@@ -99,6 +123,101 @@ def get_archive_it_credentials() -> tuple[str, str] | None:
     if username and password:
         result = (username, password)
     return result
+
+
+def get_run_coordination_mode() -> str | None:
+    """
+    Returns the configured startup coordination mode when present.
+    """
+    configured_mode = os.getenv('RUN_COORDINATION_MODE')
+    result: str | None = None
+    if configured_mode is not None:
+        stripped_mode = configured_mode.strip()
+        if stripped_mode:
+            result = stripped_mode
+    return result
+
+
+def should_skip_spreadsheet_coordination_check(coordination_mode: str | None) -> bool:
+    """
+    Returns whether startup spreadsheet coordination preflight should be skipped.
+    """
+    result = coordination_mode == RUN_COORDINATION_MODE_CRON_LOCKED
+    return result
+
+
+def get_blocking_coordination_summary(
+    values: list[list[str]],
+    header_location: HeaderLocation,
+    collection_jobs: list[CollectionJob],
+) -> BlockingCoordinationSummary | None:
+    """
+    Returns blocking in-progress spreadsheet statuses for the active collection-job surface.
+    """
+    blocking_collection_ids: list[int] = []
+    blocking_statuses: set[str] = set()
+    status_column_index = header_location.column_map['processing_status_main']
+    collection_jobs_by_row = {collection_job.row_number: collection_job for collection_job in collection_jobs}
+    for row_number, collection_job in collection_jobs_by_row.items():
+        row_index = row_number - 1
+        if row_index < 0 or row_index >= len(values):
+            continue
+        row = values[row_index]
+        status_value = ''
+        if status_column_index < len(row):
+            status_value = row[status_column_index].strip()
+        if not status_value:
+            continue
+        normalized_status = status_value.casefold()
+        if normalized_status in BLOCKING_COORDINATION_STATUSES:
+            blocking_collection_ids.append(collection_job.collection_id)
+            blocking_statuses.add(normalized_status)
+        else:
+            log.info(
+                'Collection %s coordination preflight ignored non-blocking spreadsheet status %s.',
+                collection_job.collection_id,
+                status_value,
+            )
+    result: BlockingCoordinationSummary | None = None
+    if blocking_collection_ids:
+        result = BlockingCoordinationSummary(
+            blocking_collection_ids=blocking_collection_ids,
+            blocking_statuses=sorted(blocking_statuses),
+        )
+    return result
+
+
+def enforce_startup_run_coordination(
+    coordination_mode: str | None,
+    values: list[list[str]],
+    header_location: HeaderLocation,
+    collection_jobs: list[CollectionJob],
+) -> None:
+    """
+    Enforces the startup spreadsheet coordination policy for non-cron_locked runs.
+    """
+    log.info('Resolved startup coordination mode: %s', coordination_mode or '<unset>')
+    if should_skip_spreadsheet_coordination_check(coordination_mode):
+        log.info('Skipping spreadsheet coordination preflight because RUN_COORDINATION_MODE=cron_locked.')
+        return
+    blocking_summary = get_blocking_coordination_summary(values, header_location, collection_jobs)
+    if blocking_summary is None:
+        log.info('Spreadsheet coordination preflight found no blocking in-progress statuses.')
+        return
+    log.error(
+        'Spreadsheet coordination preflight blocked startup with %s blocking rows and statuses %s.',
+        len(blocking_summary.blocking_collection_ids),
+        blocking_summary.blocking_statuses,
+    )
+    blocking_collection_id_display = ', '.join(
+        str(collection_id) for collection_id in blocking_summary.blocking_collection_ids
+    )
+    blocking_status_display = ', '.join(blocking_summary.blocking_statuses)
+    raise RunCoordinationError(
+        'Non-cron_locked runs must not start when spreadsheet in-progress statuses are present. '
+        f'Blocking statuses: {blocking_status_display}. '
+        f'Blocking collection ids: {blocking_collection_id_display}.'
+    )
 
 
 def count_pending_download_candidates(discovered_records: list[dict[str, object]], state: dict[str, object]) -> int:
