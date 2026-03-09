@@ -1,9 +1,12 @@
+import hashlib
+import json
 import os
 import sys
 import unittest
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -29,6 +32,7 @@ from lib.orchestration import (
     build_collection_failure_report,
     build_collection_final_report,
     build_download_progress_detail,
+    build_evaluated_active_downloads,
     build_planned_download_paths,
     build_planned_downloads,
     build_reconciliation_retry_downloads,
@@ -327,45 +331,6 @@ class TestDownloadPlanningHelpers(TestCase):
             )
         )
 
-    def test_build_reconciliation_retry_downloads_skips_existing_local_warc(self):
-        """
-        Checks that a manifest entry is not queued when its WARC is already present on disk.
-        """
-        existing_warc = Path('/tmp/storage/collections/123/warcs/2026/03/existing-alpha.warc.gz')
-        state = {
-            'files': {
-                'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
-                    'source_url': 'https://example.org/alpha.warc.gz',
-                    'warc_path': str(existing_warc),
-                }
-            }
-        }
-
-        with patch('lib.orchestration.Path.exists', return_value=True):
-            result = build_reconciliation_retry_downloads(Path('/tmp/storage'), 123, state)
-
-        self.assertEqual(result, [])
-
-    def test_build_reconciliation_retry_downloads_skips_malformed_manifest_entries(self):
-        """
-        Checks that malformed manifest entries without usable source-url or warc-path values are skipped safely.
-        """
-        state = {
-            'files': {
-                'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
-                    'warc_path': '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz',
-                },
-                'ARCHIVEIT-123-20260306123556-00000-beta.warc.gz': {
-                    'source_url': 'https://example.org/beta.warc.gz',
-                },
-                'ARCHIVEIT-123-20260306123656-00000-gamma.warc.gz': 'not-a-dict',
-            }
-        }
-
-        result = build_reconciliation_retry_downloads(Path('/tmp/storage'), 123, state)
-
-        self.assertEqual(result, [])
-
     def test_merge_planned_downloads_prefers_discovery_candidate_for_duplicate_filename(self):
         """
         Checks that discovery planning wins when the same filename appears in both candidate sources.
@@ -386,6 +351,153 @@ class TestDownloadPlanningHelpers(TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].source_url, 'https://example.org/discovery-alpha.warc.gz')
+
+    def test_build_evaluated_active_downloads_keeps_missing_warc_and_excludes_complete_file(self):
+        """
+        Checks that evaluation keeps a missing WARC active and excludes an already-complete local file.
+        """
+        with TemporaryDirectory() as temp_dir:
+            storage_root = Path(temp_dir)
+            missing_filename = 'ARCHIVEIT-123-20260306123456-00000-missing.warc.gz'
+            complete_filename = 'ARCHIVEIT-123-20260306123556-00000-complete.warc.gz'
+            missing_planned_download = PlannedDownload(
+                filename=missing_filename,
+                source_url='https://example.org/missing.warc.gz',
+                planned_paths=build_planned_download_paths(storage_root, 123, [{'filename': missing_filename}])[0],
+            )
+            complete_planned_download = PlannedDownload(
+                filename=complete_filename,
+                source_url='https://example.org/complete.warc.gz',
+                planned_paths=build_planned_download_paths(storage_root, 123, [{'filename': complete_filename}])[0],
+            )
+            content = b'complete-bytes'
+            expected_digest = hashlib.sha256(content).hexdigest()
+            complete_planned_download.planned_paths.warc_path.parent.mkdir(parents=True, exist_ok=True)
+            complete_planned_download.planned_paths.warc_path.write_bytes(content)
+            complete_planned_download.planned_paths.sha256_path.parent.mkdir(parents=True, exist_ok=True)
+            complete_planned_download.planned_paths.sha256_path.write_text(
+                f'{expected_digest} *{complete_planned_download.planned_paths.warc_path.name}\n',
+                encoding='utf-8',
+            )
+            complete_planned_download.planned_paths.json_path.write_text(
+                json.dumps(
+                    {
+                        'sha256': expected_digest,
+                        'size': len(content),
+                        'source_url': complete_planned_download.source_url,
+                        'warc_filename': complete_planned_download.planned_paths.warc_path.name,
+                        'warc_path': str(complete_planned_download.planned_paths.warc_path),
+                    }
+                ),
+                encoding='utf-8',
+            )
+            state = {
+                'files': {
+                    complete_filename: {
+                        'status': 'downloaded',
+                        'json_path': str(complete_planned_download.planned_paths.json_path),
+                    }
+                }
+            }
+
+            active_downloads, reason_counts = build_evaluated_active_downloads(
+                [missing_planned_download, complete_planned_download],
+                state,
+            )
+
+        self.assertEqual([planned_download.filename for planned_download in active_downloads], [missing_filename])
+        self.assertEqual(reason_counts['missing_warc'], 1)
+        self.assertEqual(reason_counts['already_complete'], 1)
+
+    def test_build_evaluated_active_downloads_keeps_missing_fixity_and_size_mismatch(self):
+        """
+        Checks that evaluation keeps candidates active for missing fixity and size mismatch conditions.
+        """
+        with TemporaryDirectory() as temp_dir:
+            storage_root = Path(temp_dir)
+            fixity_filename = 'ARCHIVEIT-123-20260306123456-00000-fixity.warc.gz'
+            mismatch_filename = 'ARCHIVEIT-123-20260306123556-00000-size.warc.gz'
+            fixity_planned_download = PlannedDownload(
+                filename=fixity_filename,
+                source_url='https://example.org/fixity.warc.gz',
+                planned_paths=build_planned_download_paths(storage_root, 123, [{'filename': fixity_filename}])[0],
+            )
+            mismatch_planned_download = PlannedDownload(
+                filename=mismatch_filename,
+                source_url='https://example.org/size.warc.gz',
+                planned_paths=build_planned_download_paths(storage_root, 123, [{'filename': mismatch_filename}])[0],
+            )
+            fixity_planned_download.planned_paths.warc_path.parent.mkdir(parents=True, exist_ok=True)
+            fixity_planned_download.planned_paths.warc_path.write_bytes(b'fixity-bytes')
+            mismatch_planned_download.planned_paths.warc_path.parent.mkdir(parents=True, exist_ok=True)
+            mismatch_planned_download.planned_paths.warc_path.write_bytes(b'12345')
+            state = {
+                'files': {
+                    mismatch_filename: {
+                        'status': 'downloaded',
+                        'size': 99,
+                    }
+                }
+            }
+
+            active_downloads, reason_counts = build_evaluated_active_downloads(
+                [fixity_planned_download, mismatch_planned_download],
+                state,
+            )
+
+        self.assertEqual(
+            [planned_download.filename for planned_download in active_downloads],
+            [fixity_filename, mismatch_filename],
+        )
+        self.assertEqual(reason_counts['missing_fixity'], 1)
+        self.assertEqual(reason_counts['size_mismatch'], 1)
+
+    def test_build_evaluated_active_downloads_keeps_retry_after_prior_failure(self):
+        """
+        Checks that evaluation keeps a prior failed manifest entry active even when local artifacts are otherwise complete.
+        """
+        with TemporaryDirectory() as temp_dir:
+            storage_root = Path(temp_dir)
+            filename = 'ARCHIVEIT-123-20260306123456-00000-retry.warc.gz'
+            planned_download = PlannedDownload(
+                filename=filename,
+                source_url='https://example.org/retry.warc.gz',
+                planned_paths=build_planned_download_paths(storage_root, 123, [{'filename': filename}])[0],
+            )
+            content = b'retry-bytes'
+            expected_digest = hashlib.sha256(content).hexdigest()
+            planned_download.planned_paths.warc_path.parent.mkdir(parents=True, exist_ok=True)
+            planned_download.planned_paths.warc_path.write_bytes(content)
+            planned_download.planned_paths.sha256_path.parent.mkdir(parents=True, exist_ok=True)
+            planned_download.planned_paths.sha256_path.write_text(
+                f'{expected_digest} *{planned_download.planned_paths.warc_path.name}\n',
+                encoding='utf-8',
+            )
+            planned_download.planned_paths.json_path.write_text(
+                json.dumps(
+                    {
+                        'sha256': expected_digest,
+                        'size': len(content),
+                        'source_url': planned_download.source_url,
+                        'warc_filename': planned_download.planned_paths.warc_path.name,
+                        'warc_path': str(planned_download.planned_paths.warc_path),
+                    }
+                ),
+                encoding='utf-8',
+            )
+            state = {
+                'files': {
+                    filename: {
+                        'status': 'failed',
+                        'json_path': str(planned_download.planned_paths.json_path),
+                    }
+                }
+            }
+
+            active_downloads, reason_counts = build_evaluated_active_downloads([planned_download], state)
+
+        self.assertEqual([planned_download.filename for planned_download in active_downloads], [filename])
+        self.assertEqual(reason_counts['retry_after_prior_failure'], 1)
 
 
 class TestProcessCollectionJob(TestCase):

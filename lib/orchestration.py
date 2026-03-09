@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from collections.abc import Callable
@@ -17,7 +18,7 @@ from lib.collection_sheet import (
     update_collection_processing_status,
 )
 from lib.downloader import DownloadResult, download_to_path
-from lib.fixity import FixityResult, write_fixity_sidecars
+from lib.fixity import FixityResult, validate_fixity_sidecars, write_fixity_sidecars
 from lib.local_state import (
     load_collection_state,
     save_collection_state,
@@ -583,11 +584,43 @@ def run_planned_downloads(
         destination_path = planned_download.planned_paths.warc_path
         if destination_path.exists():
             log.info(
-                'Collection %s skipping download for %s because the destination already exists: %s',
+                'Collection %s skipping download for %s because the destination already exists and proceeding to fixity handling: %s',
                 collection_id,
                 planned_download.filename,
                 destination_path,
             )
+            fixity_result = write_fixity_sidecars(
+                warc_path=destination_path,
+                sha256_path=planned_download.planned_paths.sha256_path,
+                json_path=planned_download.planned_paths.json_path,
+                source_url=planned_download.source_url,
+            )
+            fixity_results.append(fixity_result)
+            update_file_manifest_for_fixity_result(
+                state=state,
+                filename=planned_download.filename,
+                sha256_path=planned_download.planned_paths.sha256_path,
+                json_path=planned_download.planned_paths.json_path,
+                success=fixity_result.success,
+                completed_at=fixity_result.completed_at,
+                error_message=fixity_result.error_message,
+            )
+            save_collection_state_after_file_processing(storage_root, collection_id, state, planned_download.filename)
+            if fixity_result.success:
+                log.info(
+                    'Collection %s repaired or refreshed fixity sidecars for %s: sha256=%s json=%s',
+                    collection_id,
+                    planned_download.filename,
+                    fixity_result.sha256_path,
+                    fixity_result.json_path,
+                )
+            else:
+                log.error(
+                    'Collection %s fixity repair failed for %s: %s',
+                    collection_id,
+                    planned_download.filename,
+                    fixity_result.error_message,
+                )
             continue
 
         log.debug(
@@ -989,25 +1022,32 @@ def process_collection_job(
         len(discovery_planned_downloads),
         len(planned_downloads),
     )
+    active_downloads, evaluation_reason_counts = build_evaluated_active_downloads(planned_downloads, state)
+    log_active_download_evaluation_counts(
+        collection_job.collection_id,
+        len(planned_downloads),
+        len(active_downloads),
+        evaluation_reason_counts,
+    )
     persist_planned_downloads_to_state(
         storage_root=storage_root,
         collection_id=collection_job.collection_id,
         state=state,
-        planned_downloads=planned_downloads,
+        planned_downloads=active_downloads,
         discovered_at=datetime.now(UTC).isoformat(),
     )
     write_collection_download_planning_status(
         worksheet,
         header_location,
         collection_job,
-        len(planned_downloads),
+        len(active_downloads),
     )
     log.info(
         'Collection %s spreadsheet status updated: download planning complete with %s files planned.',
         collection_job.collection_id,
-        len(planned_downloads),
+        len(active_downloads),
     )
-    if not planned_downloads:
+    if not active_downloads:
         discovery_completed_at = datetime.now(UTC).isoformat()
         write_collection_no_new_files_status(
             worksheet,
@@ -1021,19 +1061,19 @@ def process_collection_job(
             worksheet,
             header_location,
             collection_job,
-            len(planned_downloads),
+            len(active_downloads),
         )
         log.info(
             'Collection %s spreadsheet status updated: downloading in progress for %s planned files.',
             collection_job.collection_id,
-            len(planned_downloads),
+            len(active_downloads),
         )
     download_results, fixity_results = run_planned_downloads(
         client,
         storage_root,
         collection_job.collection_id,
         state,
-        planned_downloads,
+        active_downloads,
         lambda progress_detail: write_collection_download_progress_status(
             worksheet,
             header_location,
@@ -1044,7 +1084,7 @@ def process_collection_job(
     log_collection_download_summary(
         collection_job,
         pending_download_count,
-        len(planned_downloads),
+        len(active_downloads),
         download_results,
         fixity_results,
     )
@@ -1052,10 +1092,114 @@ def process_collection_job(
         storage_root=storage_root,
         collection_job=collection_job,
         discovery_completed_at=datetime.now(UTC).isoformat(),
-        planned_downloads=planned_downloads,
+        planned_downloads=active_downloads,
         download_results=download_results,
         fixity_results=fixity_results,
     )
     write_collection_final_report(worksheet, header_location, collection_job, result)
     log.info('Collection %s spreadsheet status updated: final outcome written.', collection_job.collection_id)
     return result
+
+
+@dataclass(frozen=True)
+class DownloadNeedEvaluation:
+    """
+    Represents whether a planned candidate still requires backup work.
+    """
+
+    needs_work: bool
+    reason: str
+
+
+def get_manifest_expected_size(state: dict[str, object], filename: str) -> int | None:
+    """
+    Returns the expected size for one filename when current manifest data provides it.
+    """
+    files_value = state.get('files')
+    files_state = files_value if isinstance(files_value, dict) else {}
+    entry_value = files_state.get(filename)
+    result: int | None = None
+    if isinstance(entry_value, dict):
+        size_value = entry_value.get('size')
+        if isinstance(size_value, int):
+            result = size_value
+        else:
+            json_path_value = entry_value.get('json_path')
+            if isinstance(json_path_value, str) and json_path_value.strip():
+                try:
+                    json_data = json.loads(Path(json_path_value).read_text(encoding='utf-8'))
+                    json_size_value = json_data.get('size') if isinstance(json_data, dict) else None
+                    if isinstance(json_size_value, int):
+                        result = json_size_value
+                except Exception:
+                    result = None
+    return result
+
+
+def evaluate_planned_download_need(
+    planned_download: PlannedDownload,
+    state: dict[str, object],
+) -> DownloadNeedEvaluation:
+    """
+    Evaluates whether one planned candidate still requires backup work now.
+    """
+    warc_path = planned_download.planned_paths.warc_path
+    if not warc_path.exists():
+        return DownloadNeedEvaluation(needs_work=True, reason='missing_warc')
+
+    expected_size = get_manifest_expected_size(state, planned_download.filename)
+    if expected_size is not None and warc_path.stat().st_size != expected_size:
+        return DownloadNeedEvaluation(needs_work=True, reason='size_mismatch')
+
+    fixity_validation = validate_fixity_sidecars(
+        warc_path=warc_path,
+        sha256_path=planned_download.planned_paths.sha256_path,
+        json_path=planned_download.planned_paths.json_path,
+    )
+    if not fixity_validation.is_valid:
+        reason = fixity_validation.error_reason or 'invalid_fixity'
+        return DownloadNeedEvaluation(needs_work=True, reason=reason)
+
+    files_value = state.get('files')
+    files_state = files_value if isinstance(files_value, dict) else {}
+    entry_value = files_state.get(planned_download.filename)
+    if isinstance(entry_value, dict) and entry_value.get('status') == 'failed':
+        return DownloadNeedEvaluation(needs_work=True, reason='retry_after_prior_failure')
+
+    return DownloadNeedEvaluation(needs_work=False, reason='already_complete')
+
+
+def build_evaluated_active_downloads(
+    planned_downloads: list[PlannedDownload],
+    state: dict[str, object],
+) -> tuple[list[PlannedDownload], dict[str, int]]:
+    """
+    Builds the evaluated active-download list and a summary of evaluation reasons.
+    """
+    active_downloads: list[PlannedDownload] = []
+    reason_counts: dict[str, int] = {}
+    for planned_download in planned_downloads:
+        evaluation = evaluate_planned_download_need(planned_download, state)
+        reason_counts[evaluation.reason] = reason_counts.get(evaluation.reason, 0) + 1
+        if evaluation.needs_work:
+            active_downloads.append(planned_download)
+    result = (active_downloads, reason_counts)
+    return result
+
+
+def log_active_download_evaluation_counts(
+    collection_id: int,
+    merged_count: int,
+    active_count: int,
+    reason_counts: dict[str, int],
+) -> None:
+    """
+    Logs the merged-versus-evaluated planning counts and evaluation reasons.
+    """
+    log.info(
+        'Collection %s evaluation kept %s of %s merged candidates as active downloads. Reason counts: %s',
+        collection_id,
+        active_count,
+        merged_count,
+        reason_counts,
+    )

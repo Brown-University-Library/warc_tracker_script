@@ -22,6 +22,16 @@ class FixityResult:
     error_message: str | None
 
 
+@dataclass(frozen=True)
+class FixityValidationResult:
+    """
+    Represents whether local fixity sidecars are valid enough for MVP evaluation.
+    """
+
+    is_valid: bool
+    error_reason: str | None
+
+
 def compute_sha256_for_file(file_path: Path, chunk_size: int = 65536) -> str:
     """
     Computes the SHA-256 hex digest for one local file using chunked reads.
@@ -41,6 +51,57 @@ def build_sidecar_partial_path(path: Path) -> Path:
     Called by: write_text_atomically()
     """
     result = path.with_name(f'{path.name}.partial')
+    return result
+
+
+def validate_sha256_sidecar_content(sha256_path: Path, warc_path: Path, expected_digest: str) -> bool:
+    """
+    Validates the checksum-line content of one SHA-256 sidecar.
+    """
+    expected_content = f'{expected_digest} *{warc_path.name}'
+    content = sha256_path.read_text(encoding='utf-8').strip()
+    result = content == expected_content
+    return result
+
+
+def validate_json_sidecar_content(json_path: Path, warc_path: Path, expected_digest: str) -> bool:
+    """
+    Validates the parsed JSON fixity metadata for one WARC file.
+    """
+    json_data = json.loads(json_path.read_text(encoding='utf-8'))
+    if not isinstance(json_data, dict):
+        return False
+    sha256_value = json_data.get('sha256')
+    warc_filename_value = json_data.get('warc_filename')
+    warc_path_value = json_data.get('warc_path')
+    result = sha256_value == expected_digest and warc_filename_value == warc_path.name and warc_path_value == str(warc_path)
+    return result
+
+
+def validate_fixity_sidecars(
+    warc_path: Path,
+    sha256_path: Path,
+    json_path: Path,
+    chunk_size: int = 65536,
+) -> FixityValidationResult:
+    """
+    Validates local fixity sidecars by checking existence, parseability, and checksum consistency.
+    """
+    is_valid = False
+    error_reason: str | None = None
+    if not sha256_path.exists() or not json_path.exists():
+        error_reason = 'missing_fixity'
+    else:
+        try:
+            expected_digest = compute_sha256_for_file(warc_path, chunk_size=chunk_size)
+            sha256_valid = validate_sha256_sidecar_content(sha256_path, warc_path, expected_digest)
+            json_valid = validate_json_sidecar_content(json_path, warc_path, expected_digest)
+            is_valid = sha256_valid and json_valid
+            if not is_valid:
+                error_reason = 'invalid_fixity'
+        except Exception:
+            error_reason = 'invalid_fixity'
+    result = FixityValidationResult(is_valid=is_valid, error_reason=error_reason)
     return result
 
 
