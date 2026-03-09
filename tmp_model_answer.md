@@ -1,160 +1,135 @@
-# Answer
+# Investigation summary
 
-I think this is a **reasonable lightweight approach**, and it is closer to something I would endorse than spreadsheet-only coordination.
+I reviewed:
+- `warc_tracker_script/AGENTS.md`
+- `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
+- `logs/warc_tracker_script.log`
+- the relevant orchestration/status code in `warc_tracker_script/lib/orchestration.py`
 
-## Short version
+## Short answer
 
-- **Yes**: using `flock` for the cron invocation is the right hard guard.
-- **Yes**: using a spreadsheet `Status-Main` check for non-cron runs is a useful soft guard.
-- **But**: I would change the meaning of the environment variable a bit, because `RUNNING_ON_LEGIT_SERVER="yes"` is slightly too indirect and a little brittle.
+I do **not** think this is a literal arithmetic off-by-1 bug.
 
-## What is good about your proposal
+I think it is a **count-definition mismatch**:
+- the second-run in-progress denominator (`7`) is the number of **planned downloads**
+- the second-run final success count (`6`) is the number of **actual successful download operations**
+- one of the 7 planned items was already present on disk by the time the second run reached the download loop, so it was **planned** but then **skipped**, which is why the final text said `6`
 
-Your proposal cleanly separates two cases.
+## What the log shows
 
-### Case 1: cron on the real server
+### First run
 
-This case is protected by:
+The first run clearly planned 24 downloads:
+- `Collection 22900 has 24 reconciliation candidates, 1 discovery candidates, and 24 merged planned downloads.`
+- `Collection 22900 spreadsheet status updated: download planning complete with 24 files planned.`
+- `Collection 22900 spreadsheet status updated: downloading in progress for 24 planned files.`
 
-- `flock -n /tmp/warc_backup.lock`
+That matches your understanding that the collection really had 24 files.
 
-That is the strongest part of the design, because it is:
+The first run ended with 6 failures:
+- `Collection 22900 has 1 pending candidates, 24 planned downloads, 18 download successes, 6 download failures, 0 skipped existing files, 18 fixity successes, and 0 fixity failures.`
 
-- host-local
-- simple
-- not dependent on spreadsheet freshness
-- aligned with the plan’s `lock and cron wrapper hardening` step
+So after run 1, there were 18 successfully downloaded files on disk and 6 retryable missing files.
 
-So for the real scheduled run, I think your shell wrapper is good.
+### Second run
 
-### Case 2: local/manual run
+The second run shows exactly why `7` appeared:
+- `Collection 22900 has 6 reconciliation candidates, 1 discovery candidates, and 7 merged planned downloads.`
 
-This case is protected by a preflight spreadsheet check.
+So the spreadsheet showed `7` because the code uses the merged planned-download list length for in-progress reporting.
 
-That is useful because a manual run is exactly the kind of invocation that might bypass cron-wrapper locking conventions. Checking `Status-Main` before doing work gives you a reasonable way to say:
+Later in the same run, the log shows this:
+- `Collection 22900 skipping download for ARCHIVEIT-22900-QUARTERLY-JOB2649176-0-SEED3256845-20260105141018582-00000-aokwrf4m.warc.gz because the destination already exists`
 
-- "cron appears to be in progress, so do not start this local run"
+And then the final summary says:
+- `Collection 22900 has 0 pending candidates, 7 planned downloads, 6 download successes, 0 download failures, 1 skipped existing files, 6 fixity successes, and 0 fixity failures.`
 
-That is a good operational safeguard.
+That is the direct explanation for the visible mismatch:
+- `7 planned`
+- `6 successful downloads`
+- `1 skipped existing file`
 
-## My main reaction
+## Why that happened in code
 
-I like the overall structure, but I would refine one part:
+The relevant code paths are in `warc_tracker_script/lib/orchestration.py`.
 
-- do not key the behavior to whether the machine is a "legit server"
-- key it to whether the invocation is a **trusted cron-locked run**
+### In-progress denominator uses planned-download count
 
-Those are not quite the same thing.
+`process_collection_job()` writes the download-start spreadsheet status using:
+- `write_collection_download_start_status(..., len(planned_downloads))`
 
-## Why `RUNNING_ON_LEGIT_SERVER` worries me a little
+And `build_download_start_status()` formats that as:
+- `0% (0/{total_planned_downloads} files)`
 
-The name implies:
+So the second run's initial denominator of `7` came from `len(planned_downloads)`.
 
-- this machine is the real machine
+### Discovery planning currently includes a rediscovered file even if it already exists locally
 
-But what you actually want is more like:
+`build_planned_downloads()` creates planned download items from discovered WASAPI records if they have:
+- a usable filename
+- a usable source URL
 
-- this invocation is the protected cron path that already holds the lock
+It does **not** check whether the destination WARC already exists locally.
 
-Those can diverge.
+That means the rediscovered quarterly file was included in `planned_downloads`, contributing to the `7`.
 
-For example:
+### Actual download results exclude skipped-existing items
 
-- you manually run the script on the real server
-- the env var is still present
-- the code skips the spreadsheet check
-- if that manual run also bypasses `flock`, you have lost your extra protection
+In `run_planned_downloads()`:
+- if `destination_path.exists()`, the code logs a skip and `continue`s immediately
+- it does **not** append a `DownloadResult` for that skipped item
 
-So the risk is not the server identity itself. The risk is whether the current invocation is really the guarded invocation you trust.
+So skipped-existing items:
+- still count in `planned_downloads`
+- do **not** count in `download_results`
 
-## Better framing for the env var
+### Final success text uses only actual successful downloads
 
-If you want to keep the environment-variable idea, I would make it mean something narrower, such as:
+`build_collection_final_report()` computes:
+- `successful_download_count = sum(1 for result in download_results if result.success)`
+- status detail: `'{successful_download_count} file downloads completed successfully'`
 
-- `RUN_COORDINATION_MODE=cron_locked`
-- or `SKIP_SPREADSHEET_RUNNING_CHECK=yes`
-- or `TRUST_WRAPPER_LOCK=yes`
+So the final `6` is the number of actual successful download operations during that run, not the number of planned items.
 
-That makes the policy clearer:
+## Conclusion
 
-- the wrapper says: this run already has the hard lock, so skip the softer spreadsheet coordination check
+Your observed `7` then `6` sequence is explained by current code and log evidence.
 
-That is a better signal than "I am on the legit server."
+It is **not** that the collection suddenly had 7 missing files.
 
-## What I would recommend operationally
+Instead:
+- there were really **6 retry candidates** left from the first run
+- plus **1 rediscovered WASAPI record**
+- that rediscovered file was already present locally
+- so it was counted during planning, but skipped during execution
+- therefore the final success message reported only `6`
 
-I would recommend this rule set.
+## Is this a bug?
 
-### Cron path
+I would call it a **real reporting bug / UX inconsistency**, though not a literal off-by-1 arithmetic error.
 
-- cron always runs through `flock`
-- cron sets a wrapper-specific env var saying this invocation is already hard-locked
-- code skips the spreadsheet preflight coordination check in that case
+The user-visible issue is that the spreadsheet mixes two different notions of count:
+- **planned items** during in-progress reporting
+- **actual successful download operations** in the final success text
 
-### Manual/local path
+That mismatch is what made the second run look suspicious.
 
-- manual/local runs do not set that env var by default
-- code checks spreadsheet `Status-Main` fields first
-- if in-progress values are present, the run exits or warns and exits
+## Smallest likely fix direction
 
-That is a coherent policy.
+The cleanest fix is probably to make the in-progress denominator reflect **actual work that still needs download**, not raw merged planned entries.
 
-## Important caveat
+In practice, that likely means filtering discovery-based planned downloads so they do not enter the active planned list when the destination WARC already exists locally.
 
-Even with your proposal, the spreadsheet check is still only a **soft** guard.
+An alternative would be to keep the current planning behavior but change the final wording so it explicitly distinguishes:
+- planned items
+- skipped-existing items
+- successful new downloads
 
-It can still be wrong because of:
-
-- stale in-progress statuses after a crash
-- race windows if two non-cron runs start close together
-- temporary spreadsheet unavailability
-
-But in your design, that is acceptable, because the spreadsheet check is only protecting the less-trusted local/manual path. The real cron path is still protected by `flock`.
-
-That is why this version is much better than spreadsheet-only locking.
-
-## One implementation-shape concern
-
-You said the code would check "all the spreadsheet's `Status-Main` fields" for an in-process value.
-
-That can work, but I would keep the rule narrow and explicit.
-
-For example:
-
-- define a bounded set of in-progress statuses in code
-- check only for those exact values
-
-Probably something like:
-
-- `discovery-in-progress`
-- `downloading-in-progress`
-
-Possibly also:
-
-- `download-planning-complete`
-
-depending on whether you want that state to count as still actively in flight.
-
-I would avoid loose text matching like "contains progress" or anything fuzzy.
-
-## My recommendation
-
-So my reaction is:
-
-- **The design is sound enough for MVP.**
-- **The strongest part is still `flock` for cron.**
-- **The spreadsheet check is a good added safeguard for local/manual runs.**
-- **I would rename the env var so it means `this invocation is already protected by the wrapper lock`, not `this is the legit server`.**
-
-## Best concise version of the policy
-
-If I were writing the policy in one sentence, I would phrase it like this:
-
-- scheduled production runs use `flock` and may skip spreadsheet coordination checks
-- unscheduled/manual runs must first check spreadsheet in-progress statuses and should refuse to start if a run appears active
+But based on the current spreadsheet wording, I think the stronger fix is to make the progress denominator align with actual download work.
 
 ## Bottom line
 
-- **Yes, this is a reasonable lightweight design.**
-- **I would keep it, with one tweak: make the env var describe trusted locked invocation mode, not server identity.**
-- **That gives you a practical split between a hard cron guard and a soft local-run guard without overcomplicating the script.**
+- The collection total of `24` appears correct.
+- The second-run `7` came from `6 reconciliation retries + 1 rediscovered WASAPI item`.
+- The second-run final `6` came from `6 actual successful downloads`, with `1 skipped existing file`.
+- So this looks like a **planned-vs-executed counting mismatch**, not a true arithmetic off-by-1.
