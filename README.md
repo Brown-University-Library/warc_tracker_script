@@ -6,6 +6,10 @@ on this page...
 - [How it works in practice](#how-it-works-in-practice)
 - [Current state of the project](#current-state-of-the-project)
 - [FAQs](#faqs)
+  - [store-time and lookback](#store-time-and-lookback)
+  - [why is the local filesystem the source of truth?](#why-is-the-local-filesystem-the-source-of-truth)
+  - [what gets stored for each collection?](#what-gets-stored-for-each-collection)
+  - [spreadsheet updates](#spreadsheet-updates)
 
 ## Overview
 
