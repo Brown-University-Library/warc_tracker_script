@@ -9,7 +9,7 @@ on this page...
 
 ## Overview
 
-This script helps track and back up Archive-It WARC files for collections listed as active in a Google Sheets tracking spreadsheet.
+This script backs up Archive-It WARC files for collections listed as active in a Google Sheets tracking spreadsheet.
 
 At a high level, it checks which collections are active, asks WASAPI (Archive-It's Web Archiving Systems API) what WARC files are available, downloads anything missing, writes local fixity information, and updates the spreadsheet with collection-level progress.
 
