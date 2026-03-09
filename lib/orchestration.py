@@ -46,6 +46,15 @@ DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW = 'incremental-overlap-window'
 DOWNLOAD_PROGRESS_MILESTONES = (20, 40, 60, 80)
 
 
+def format_downloaded_size_gb(size_bytes: int) -> str:
+    """
+    Formats a byte count as gigabytes rounded to one decimal place.
+    """
+    size_gb = size_bytes / (1024**3)
+    result = f'{size_gb:.1f} GB'
+    return result
+
+
 @dataclass(frozen=True)
 class PlannedDownload:
     """
@@ -585,7 +594,7 @@ def build_collection_summary_update(
     result = CollectionSummaryUpdate(
         summary_status_last_wasapi_check=discovery_completed_at,
         summary_status_downloaded_warcs_count=str(successful_download_count),
-        summary_status_downloaded_warcs_size=str(successful_download_size),
+        summary_status_downloaded_warcs_size=format_downloaded_size_gb(successful_download_size),
         summary_status_server_path=str(collection_root),
     )
     return result
@@ -646,7 +655,7 @@ def build_collection_failure_report(
         summary_update=CollectionSummaryUpdate(
             summary_status_last_wasapi_check=reported_at,
             summary_status_downloaded_warcs_count='0',
-            summary_status_downloaded_warcs_size='0',
+            summary_status_downloaded_warcs_size='0.0 GB',
             summary_status_server_path=str(storage_root / 'collections' / str(collection_job.collection_id)),
         ),
     )

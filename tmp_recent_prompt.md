@@ -1,5 +1,4 @@
 - review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
 - review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them, being sure that previous and new tests pass.
-- update `warc_tracker_script/PLAN__simplified_warc_backup_script.md` with what has been completed.
+- make the spreadsheet update of the "sum--Downloaded-WARCs-Size" field more human-friendly -- expressing the size in GB, to the nearest single-decimal place.
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.

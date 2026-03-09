@@ -413,7 +413,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_final_reporting.call_args.args[2], 7)
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '1')
-        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '11')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
     def test_zero_planned_downloads_write_planning_then_no_new_files_statuses(self):
         """
@@ -1054,7 +1054,7 @@ class TestCollectionReportingHelpers(TestCase):
         )
 
         self.assertEqual(result.status_update.processing_status_main, STATUS_COMPLETED_WITH_SOME_FILE_FAILURES)
-        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
     def test_build_collection_failure_report_for_discovery_failure(self):
         """

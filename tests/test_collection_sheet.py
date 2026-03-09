@@ -195,7 +195,7 @@ class TestCollectionReportingContract(TestCase):
         summary_update = CollectionSummaryUpdate(
             summary_status_last_wasapi_check='2026-03-07T15:00:00+00:00',
             summary_status_downloaded_warcs_count='1',
-            summary_status_downloaded_warcs_size='11',
+            summary_status_downloaded_warcs_size='0.0 GB',
             summary_status_server_path='/tmp/storage/collections/123',
         )
 
@@ -208,7 +208,7 @@ class TestCollectionReportingContract(TestCase):
                 {'range': 'B9', 'values': [['1 file downloads completed successfully']]},
                 {'range': 'C9', 'values': [['2026-03-07T15:00:00+00:00']]},
                 {'range': 'D9', 'values': [['1']]},
-                {'range': 'E9', 'values': [['11']]},
+                {'range': 'E9', 'values': [['0.0 GB']]},
                 {'range': 'F9', 'values': [['/tmp/storage/collections/123']]},
             ],
         )
