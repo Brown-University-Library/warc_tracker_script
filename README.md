@@ -28,7 +28,6 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 - The current production flow processes collections sequentially.
 - It already performs collection discovery, download planning, downloading, fixity writing, and collection-level spreadsheet updates.
 - The design plan still leaves room for a later concurrent version with dedicated download workers and a separate spreadsheet updater.
-- Cron-oriented hardening is partly in place, but the full lock-wrapper path is still a later step.
 
 ## FAQs
 
