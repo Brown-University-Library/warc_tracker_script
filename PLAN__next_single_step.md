@@ -1,4 +1,4 @@
-# Next Single Step: Add Spreadsheet Status Coordination Check for Non-`cron_locked` Runs
+# Next Single Step: Filter Planned Downloads Before Writing Download-Start Status
 
 ## Context for Future Agents
 
@@ -8,17 +8,15 @@
 
 - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
 
-**Recent coordination guidance**:
+**Recent reporting-count guidance**:
 
 - `warc_tracker_script/tmp_recent_prompt.md`
 - `warc_tracker_script/tmp_model_answer.md`
 
-**Focus of this step**: implement a startup spreadsheet-status coordination check that runs when `RUN_COORDINATION_MODE` is absent or has any value other than `cron_locked`.
+**Focus of this step**: implement Option 1 from `tmp_model_answer.md`.
 
-The goal is to preserve the planned split between:
-
-- a **hard** guard for the scheduled production path via wrapper locking
-- a **soft** guard for manual or local runs via spreadsheet preflight status inspection
+The goal is to make the spreadsheet-visible denominator mean **files that still require download work now**, instead of raw
+merged planned candidates that may already exist on disk by the time download-status reporting begins.
 
 This step should fit the current sequential production flow and keep `main.py` thin.
 
@@ -26,36 +24,39 @@ This step should fit the current sequential production flow and keep `main.py` t
 
 ## Goal of This Step
 
-Add a pre-processing coordination check with this policy:
+Add one authoritative pre-download filtering step so that, after merged planning is complete:
 
-1. if `RUN_COORDINATION_MODE=cron_locked`, skip the spreadsheet running-status check and continue
-2. otherwise, read the spreadsheet before significant processing begins
-3. inspect collection-row `processing_status_main` values
-4. if any row is in an explicitly defined in-progress state, refuse to start the run
+1. the code derives a filtered download list from the broader planned-candidate list
+2. entries that already satisfy the current MVP "no download needed" rule are removed before download-start status is written
+3. the filtered list becomes the list used for:
+   - the spreadsheet-facing planned-download denominator
+   - the initial `downloading-in-progress` status
+   - mid-download progress milestones
+   - the actual sequential download loop
 
-This check should happen early enough that a manual or local run does not begin WASAPI discovery or download work when another run appears active.
-
-That is the whole feature for this step.
+This step is specifically about making the **download-work denominator** feel correct and internally consistent.
 
 ---
 
 ## Why This Is the Right Next Step
 
-1. **It matches the recent coordination decision**
-   - the recent prompt/answer settled on `RUN_COORDINATION_MODE=cron_locked` as the clearer control signal
-   - the spreadsheet check is intentionally a soft guard for non-cron invocations
+1. **It directly addresses the reported mismatch**
+   - the recent prompt identified the operator-facing problem: a denominator such as `7` can include an item later skipped because
+     the file already exists
+   - Option 1 was chosen as the desired direction
 
-2. **It aligns with the master plan's remaining hardening work**
-   - `PLAN__simplified_warc_backup_script.md` lists lock/cron-wrapper hardening as not yet implemented
-   - this step handles the code-side coordination policy without jumping ahead to the full wrapper implementation
+2. **It is a small, bounded change to the current sequential flow**
+   - the current production orchestrator already builds merged `planned_downloads`
+   - the change is to insert one additional filtering pass before spreadsheet progress reporting and before the download loop begins
 
-3. **It is a small, bounded addition to the current sequential flow**
-   - the spreadsheet ingestion and required-column validation already exist
-   - this step adds one preflight decision before collection processing begins
+3. **It improves semantics without jumping to larger redesign work**
+   - no Trio conversion is required
+   - no sheet-updater task is required
+   - no broader reporting-model rewrite is required
 
-4. **It reduces accidental overlap during manual development use**
-   - local/manual runs are the likely path that can bypass wrapper locking
-   - checking the spreadsheet first is useful protection against that weaker path
+4. **It aligns with the project plan's spreadsheet philosophy**
+   - the spreadsheet is a reporting surface, so its counts should reflect real remaining work as closely as practical
+   - the filesystem and local state remain the source of truth
 
 ---
 
@@ -72,10 +73,10 @@ This step should follow these existing constraints:
 
 Interpretation for this step:
 
-- do not turn the spreadsheet check into a real lock manager
-- do not use fuzzy text matching against status cells
-- do define a small explicit set of in-progress spreadsheet statuses in code
-- do fail early before discovery/download work starts when the check says a run appears active
+- do not redesign the overall planning pipeline
+- do not introduce fuzzy spreadsheet wording as the primary fix
+- do define one explicit helper or decision point for "still requires download work now"
+- do keep the loop-level defensive skip behavior if it currently protects against small race windows
 
 ---
 
@@ -83,233 +84,227 @@ Interpretation for this step:
 
 Use this exact policy as the implementation target.
 
-### 1. Coordination-mode decision
+### 1. Keep raw merged planning available conceptually
 
-- read `RUN_COORDINATION_MODE` from the environment during startup configuration
-- if the value is exactly `cron_locked`, skip the spreadsheet-status coordination preflight
-- if the variable is missing, empty, or any other value, run the spreadsheet-status coordination preflight
+The code may continue to build the broader merged planned-candidate list exactly as it does now.
 
-Important rule:
+That broader list still serves an internal planning purpose, including combining:
 
-- the mode check should be exact-string based
-- do not broaden `cron_locked` matching to truthy values or partial matches
+- discovery-driven candidates
+- reconciliation/retry candidates
+- filename-level dedup behavior already present in the orchestrator
 
-### 2. Spreadsheet preflight decision
+This step does **not** require redefining the earlier planning merge itself.
 
-For non-`cron_locked` runs:
+### 2. Add a new filtering stage before download-start reporting
 
-- load the spreadsheet data using the existing collection-sheet pipeline
-- locate the canonical spreadsheet field for collection-level main processing status
-- inspect all relevant collection rows that can participate in this run surface
-- if any row has a value in the bounded in-progress set, abort before significant processing begins
+After merged planning completes, do one pass that derives a narrower list containing only entries that still require download work
+at that moment.
 
-### 3. In-progress status vocabulary
+That filtered list should become the authoritative list for download-status reporting and loop execution.
 
-Define one explicit code-level set for statuses that mean "a run may currently be active."
+### 3. Minimum MVP filtering rule for this step
 
-Recommended initial set:
+The recent reporting-count question focused specifically on the case where a destination WARC already exists on disk.
 
-- `discovery-in-progress`
-- `downloading-in-progress`
+Minimum implementation target:
 
-Possible inclusion to decide during implementation review:
+- remove a planned item from the active download list when its destination WARC path already exists on disk
 
-- `download-planning-complete`
+Important caveat from the master plan:
+
+- the longer-term project meaning of "needs download" can also involve fixity or verification concerns
+- this step should review the current code's actual behavior carefully before broadening the filter beyond existence checks
 
 Recommendation for this step:
 
-- start with the narrowest conservative set of definitely active statuses
-- only include `download-planning-complete` if the current sequential flow can leave that status visible while work is still truly underway
+- match the current sequential loop's real skip behavior first
+- if the loop currently skips purely on WARC existence, make the new pre-download filter use that same rule
+- do **not** silently broaden the rule to include new fixity-validation logic unless the current production code already relies on it
 
-Do not treat these as in-progress without explicit reasoning:
+### 4. Keep one consistent denominator after filtering
 
-- `pending`
-- `no-new-files-to-download`
-- `downloaded-without-errors`
-- `completed-with-some-file-failures`
-- `discovery-failed`
-- `spreadsheet-update-failed`
-- `skipped-invalid-collection-row`
+Once the filtered list is built, use its length consistently for all spreadsheet-visible download-progress counts in this collection run.
 
-### 4. Abort behavior
+Specifically:
 
-When an in-progress spreadsheet value is found during a non-`cron_locked` run:
+- `download-planning-complete` detail should reflect the filtered count if that status currently reports a file count
+- the initial `downloading-in-progress` detail should use the filtered count
+- coarse progress milestones should use the filtered count as their denominator
+- final success/failure summaries should remain consistent with the filtered loop input and current final-reporting semantics
 
-- stop before WASAPI discovery or download planning begins
-- raise or return a clear operational error
-- log which in-progress statuses were found
-- include enough context to explain that the run was blocked by spreadsheet coordination policy
+If any earlier planning-stage status currently exposes the broader raw candidate count, either:
 
-Recommended message shape:
+- update it to the filtered count for consistency, or
+- deliberately leave it unchanged only if the wording makes the distinction explicit
 
-- say that non-`cron_locked` runs must not start when spreadsheet in-progress statuses are present
-- include the blocking status values and, if practical, the related collection ids
+For this step, the preferred outcome is **one consistent spreadsheet-facing meaning**.
 
-### 5. Missing or malformed status values
+### 5. Preserve defensive loop behavior
 
-For this step, the spreadsheet check should remain strict but practical.
+Even after filtering, keep the loop-level defensive check if it currently skips existing destination files.
 
-Recommended rule:
+Reason:
 
-- missing or blank `processing_status_main` values are not themselves blocking
-- unrecognized non-blank values should be logged, but should not automatically block unless they exactly match the in-progress set
+- the new filter improves the denominator
+- the loop-level guard still protects against small timing windows or unexpected local changes between filtering and execution
 
-This keeps the check explicit and avoids introducing brittle heuristics.
+### 6. Manifest behavior should remain deliberate
+
+This step must review how planned-download manifest entries are currently persisted before downloads begin.
+
+Key question to answer during implementation:
+
+- should entries removed by the new active-download filter still be persisted as planned in `state.json`, or should manifest persistence move to
+  after filtering so only true active downloads are recorded for this phase?
+
+Recommendation for this step:
+
+- do not change manifest semantics casually
+- first inspect what current tests and state-writing behavior assume
+- if persistence currently happens before filtering, decide explicitly whether that remains acceptable or whether it creates the same
+  denominator confusion in durable state
+
+The code change should make this choice explicit and tested.
 
 ---
 
 ## Specific Implementation Plan
 
-### 1. Review the current startup and orchestration entry path
+### 1. Review the current sequential planning-to-download path
 
-Inspect how the script currently does the following:
+Inspect the current orchestration flow to confirm:
 
-- loads env vars and config in `main.py`
-- creates clients or dependencies
-- loads spreadsheet rows
-- validates required reporting columns
-- begins per-collection processing
+- where discovery candidates are merged with reconciliation/retry candidates
+- where planned-download manifest entries are persisted
+- where `download-planning-complete` status is written
+- where `downloading-in-progress` and milestone statuses are written
+- where the sequential loop currently skips already-existing destination WARCs
 
 Expected outcome of this review:
 
-- identify the narrowest insertion point for the coordination preflight
-- confirm that the preflight can run before expensive work begins
-- keep `main.py` as a thin orchestrator rather than embedding the spreadsheet-scan logic there
+- identify one narrow insertion point for the new filter
+- confirm the existing operational meaning of "skip because already present"
+- avoid duplicating logic in multiple places
 
-### 2. Identify or create one helper that reads coordination mode
+### 2. Identify or create one helper for active-download eligibility
 
-Add a small helper or config field that exposes whether the run is in trusted `cron_locked` mode.
+Add a focused helper with a meaning like:
 
-Recommended shape:
-
-- a helper that returns the raw coordination mode string or a small normalized value
-- orchestration code uses that helper to branch between skip-check and run-check behavior
-
-Guardrails:
-
-- avoid scattering direct `os.environ` reads across multiple modules
-- avoid naming that implies machine identity rather than invocation mode
-
-### 3. Identify or create one helper that detects blocking spreadsheet statuses
-
-Implement a focused helper that accepts normalized collection-row records and returns a summary of blocking in-progress rows.
+- planned item still requires download work now
 
 Recommended helper responsibilities:
 
-- read the canonical `processing_status_main` field from each row
-- normalize comparable string values the same way the sheet layer already normalizes fields when practical
-- compare against one explicit in-progress status set
-- return enough detail for logging and for a user-facing exception/error message
+- accept one planned-download item
+- inspect the current destination WARC path and any already-existing fields needed for the decision
+- return whether the item belongs in the active download list
 
-Recommended helper output:
+Guardrails:
 
-- whether a blocking status was found
-- the distinct blocking status values found
-- optionally the related collection ids or row references
+- keep the helper small and explicit
+- prefer a pure-ish helper around local path checks where practical
+- avoid combining it with spreadsheet status formatting
+- avoid embedding this logic directly inside `main.py`
 
-Important guardrails:
+### 3. Derive `active_downloads` from the merged planned list
 
-- keep spreadsheet API access outside the pure status-evaluation helper when possible
-- do not combine the helper with download planning or status writing logic
+After merged planning is complete, derive a filtered list such as `active_downloads`.
 
-### 4. Insert the coordination preflight before significant processing begins
+Recommended behavior:
 
-At the current startup/orchestration level:
+- preserve the existing ordering of planned items
+- filter by the new helper
+- optionally record how many items were excluded because they were already present
 
-- if `RUN_COORDINATION_MODE=cron_locked`, log that spreadsheet coordination preflight is being skipped because the invocation is trusted and hard-locked
-- otherwise, run the spreadsheet-status scan before collection processing starts
-- abort immediately if blocking statuses are found
+That filtered list should become the main input to the subsequent download-reporting path.
 
-Place this preflight after the minimal startup needed to read the spreadsheet, but before:
+### 4. Decide the interaction with manifest persistence
 
-- WASAPI discovery
-- download planning
-- downloading/fixity work
-- collection-level status transitions for the current run
+This is the most important design choice in the step.
 
-This placement matters because the check is meant to prevent accidental parallel work, not merely report it.
+Evaluate the two concrete options against existing code and tests:
 
-### 5. Decide the exact spreadsheet row scope for the preflight
-
-Before coding, confirm whether the check should inspect:
-
-- all collection rows in the relevant worksheet, or
-- only rows that would otherwise be considered valid/active candidates for processing
+- **Option A:** persist the broader planned list, then filter to `active_downloads` only for reporting and loop execution
+- **Option B:** filter first, then persist only `active_downloads` as planned-download manifest entries
 
 Recommendation for this step:
 
-- inspect the same normalized collection-row surface the orchestrator already trusts for collection work
-- do not invent a second ad hoc parsing path only for this preflight
+- prefer the option that keeps durable state and spreadsheet-visible counts aligned, unless existing recovery semantics clearly rely on the
+  broader pre-filter persistence
+- if the broader persistence is retained, document in code/tests why that distinction is intentional
 
-Practical interpretation:
+Whichever option is chosen, add tests that lock in the intended semantics.
 
-- if the sheet-ingestion layer already produces a normalized set of rows with canonical fields, reuse that result
-- if invalid rows are already skipped before processing, only broaden the scan if there is a strong reason that a skipped row can still signal active work
+### 5. Update spreadsheet status writes to use the filtered denominator
 
-### 6. Define the failure/reporting contract clearly
+Adjust the collection-level reporting path so the count visible to operators reflects `active_downloads`, not the broader raw planned list.
 
-When the preflight blocks a run, the code should produce:
+At minimum verify and update, if needed:
 
-- a clear log message
-- a deterministic exception or return-path failure
-- no partial processing side effects from the current invocation
+- `download-planning-complete`
+- the initial `downloading-in-progress`
+- coarse `20%`/`40%`/`60%`/`80%` milestone calculations
+- any detail text that currently embeds planned counts
 
-Recommended implementation target:
+If useful, include compact wording for excluded items only if that can be done without destabilizing current status text conventions.
 
-- one dedicated error path for coordination refusal
-- message includes the coordination mode and the blocking statuses found
-- if practical, include a compact list of affected collection ids for debugging
+The primary goal is the denominator fix, not a wording redesign.
 
-### 7. Add focused tests around the branching behavior
+### 6. Run the sequential download loop over `active_downloads`
 
-Add or extend `unittest` coverage for the coordination logic.
+Change the actual loop input so it iterates over the filtered list.
+
+Expected results:
+
+- fewer no-op entries enter the loop
+- progress counts line up with actual attempted download work
+- existing defensive skip behavior remains as a backstop rather than the first place the item is excluded
+
+### 7. Add focused tests around the new count semantics
+
+Add or extend `unittest` coverage for the reporting-count behavior.
 
 Minimum happy paths:
 
-- `RUN_COORDINATION_MODE=cron_locked` skips the spreadsheet-status scan and processing may continue
-- non-`cron_locked` mode with no blocking spreadsheet statuses allows processing to continue
+- when one merged planned item already exists on disk, the active-download denominator excludes it before `downloading-in-progress` is written
+- the sequential loop runs only over the filtered active-download list
 
 Minimum failure/edge paths:
 
-- missing `RUN_COORDINATION_MODE` with at least one `discovery-in-progress` row blocks the run
-- non-`cron_locked` mode with at least one `downloading-in-progress` row blocks the run
-- unrecognized status text does not block unless it exactly matches a configured in-progress value
-- blank/missing status values do not block by themselves
+- when no planned items are filtered out, existing behavior remains unchanged
+- duplicate or reconciliation-derived candidates that survive merging but point to existing WARCs are excluded consistently
+- the loop-level guard still tolerates a file appearing after filtering but before actual download execution
+- manifest persistence behavior is covered according to the explicit design choice from step 4
 
-If the implementation includes `download-planning-complete` as a blocking state, add a test that locks that decision in explicitly.
-
-### 8. Add targeted logging for operator clarity
-
-Logging should make the preflight easy to understand in cron and manual contexts.
+### 8. Keep logging targeted and operator-friendly
 
 Recommended logs:
 
-- the resolved coordination mode at startup
-- whether the spreadsheet coordination check is being skipped or executed
-- how many blocking rows were found
-- what blocking statuses were found
-- whether the run was refused before processing began
+- raw merged planned count
+- filtered active-download count
+- how many items were excluded because they already existed on disk
+- confirmation that download-status reporting is using the filtered count
 
-Avoid overly chatty per-row logging unless needed for a failure message.
+Avoid noisy per-file logs unless a failure case needs them.
 
 ---
 
 ## Likely Code Touch Points
 
 - `warc_tracker_script/main.py`
-  - only for thin orchestration/config wiring if needed
+  - only for thin orchestration wiring if needed
 - `warc_tracker_script/lib/orchestration.py`
-  - likely primary insertion point for startup coordination branching
-- `warc_tracker_script/lib/collection_sheet.py`
-  - only if a small additive helper is needed to expose canonical status-field access cleanly
-- configuration/env-loading helpers already used by the current flow
-  - if the cleanest place to expose `RUN_COORDINATION_MODE` is there
+  - likely primary location for the new filter insertion, reporting-count updates, and loop input change
+- `warc_tracker_script/lib/local_state.py`
+  - only if manifest persistence semantics need a small additive helper or adjustment
+- `warc_tracker_script/lib/storage_layout.py`
+  - only if path access helpers are the cleanest place to support eligibility checks
 - `warc_tracker_script/tests/test_orchestration.py`
-  - likely primary location for branching and preflight-behavior tests
-- any existing sheet-ingestion tests
-  - only if field normalization or status extraction needs a narrow helper test
+  - likely primary location for count-semantics and loop-input tests
+- related state or reporting tests
+  - only if existing persistence/reporting assumptions need to be updated narrowly
 
-Keep business logic out of `main.py` and avoid introducing a parallel coordination subsystem.
+Keep business logic out of `main.py` and avoid using spreadsheet wording alone as the fix.
 
 ---
 
@@ -317,46 +312,46 @@ Keep business logic out of `main.py` and avoid introducing a parallel coordinati
 
 Add focused `unittest` coverage for:
 
-- a trusted `cron_locked` invocation that bypasses spreadsheet-status scanning
-- a non-`cron_locked` invocation that proceeds when no in-progress rows are present
-- a non-`cron_locked` invocation that blocks on `discovery-in-progress`
-- a non-`cron_locked` invocation that blocks on `downloading-in-progress`
-- blank or missing status cells not blocking the run
-- unrecognized status values being logged or tolerated without blocking
-- the preflight happening before any collection discovery/download work begins
+- a planned item whose destination WARC already exists being removed before `downloading-in-progress` status is written
+- progress denominators using the filtered active-download count rather than the broader merged planned count
+- the actual sequential download loop iterating over the filtered list
+- no-filter cases preserving current counts and behavior
+- manifest-persistence semantics matching the chosen design
+- the loop-level defensive existence guard remaining intact as a backstop
 
-If current tests already mock orchestration entry points, extend those tests rather than building a heavier integration-style test unless necessary.
+If current tests already cover the planning/reporting sequence, extend those tests rather than creating heavier new integration tests unless
+necessary.
 
 ---
 
 ## Out of Scope for This Step
 
-- implementing the actual cron wrapper or `flock` shell script
-- replacing spreadsheet coordination with a real distributed lock
-- moving sheet writes behind the future dedicated sheet-updater task
+- redesigning all spreadsheet wording
+- implementing full fixity-based or verification-based "needs work" reconciliation beyond the current production rule
 - Trio orchestration with download workers
-- changing the current bounded status vocabulary beyond what is needed to define blocking in-progress values
-- redesigning final spreadsheet summary fields
-- making spreadsheet status the source of truth for correctness
+- moving sheet writes behind the future dedicated sheet-updater task
+- changing final summary fields that report on-disk collection totals
+- broader state-model redesign beyond the specific manifest-persistence decision required for this step
 
 ---
 
 ## Success Criteria
 
-- [ ] when `RUN_COORDINATION_MODE=cron_locked`, the script skips the spreadsheet-status coordination check
-- [ ] when `RUN_COORDINATION_MODE` is missing or any non-`cron_locked` value, the script runs a spreadsheet-status coordination preflight
-- [ ] the preflight blocks the run if any row is in an explicitly defined in-progress status
-- [ ] the block happens before WASAPI discovery or download work begins
-- [ ] the blocking rule is exact and bounded, not fuzzy-text based
-- [ ] focused `unittest` coverage exists for skip, allow, and block cases
+- [ ] merged planning still occurs using the current discovery/reconciliation flow
+- [ ] a new pre-download filter derives an authoritative active-download list before download-start status is written
+- [ ] already-present destination WARCs are excluded from the spreadsheet-visible denominator for download progress
+- [ ] the sequential loop runs over the filtered active-download list
+- [ ] spreadsheet progress counts remain internally consistent from download start through milestones
+- [ ] manifest-persistence semantics are explicitly chosen and covered by tests
+- [ ] focused `unittest` coverage exists for at least one happy path and one edge/race-style path
 
 ---
 
 ## Likely Follow-Up After This Step
 
-1. implement the actual cron wrapper so scheduled production runs always set `RUN_COORDINATION_MODE=cron_locked` under `flock`
-2. decide whether `download-planning-complete` should formally count as a blocking in-progress coordination state
-3. later move spreadsheet writes behind the dedicated sheet-updater task without changing this startup coordination policy
+1. decide whether the active-download eligibility helper should later expand beyond plain WARC existence to cover missing/invalid fixity artifacts
+2. evaluate whether spreadsheet detail text should explicitly mention excluded already-present files when that count is non-zero
+3. use the same active-work semantics when the project later moves to the Trio-based worker flow
 
 ---
 
@@ -372,9 +367,8 @@ If you pick this up in a new session, re-read:
 
 Quick mental model:
 
-- this step is about **startup coordination policy for manual/local runs**
-- `cron_locked` means the invocation is already trusted and hard-locked by the wrapper
-- all other invocations should first scan spreadsheet in-progress statuses
-- keep the check explicit, early, and small
-- do not turn the spreadsheet into a real lock manager
-
+- this step is about **making the visible download denominator match real remaining download work**
+- keep the current sequential flow intact
+- insert one new authoritative filter between merged planning and download-status reporting
+- make the filtered list drive both progress reporting and the actual loop
+- treat manifest persistence as an explicit design choice, not an accident
