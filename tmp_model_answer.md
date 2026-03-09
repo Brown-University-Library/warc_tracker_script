@@ -1,107 +1,156 @@
 # Answer
 
-Yes — **for preventing overlapping cron-triggered runs on the same host**, using `flock` in the cron wrapper is usually enough, and you can avoid adding lock-handling code to the Python script itself.
+Using the spreadsheet’s `Status-Main` field as an **in-process marker** is a reasonable idea, but I would treat it as a **secondary coordination signal**, not the primary lock.
 
-Your proposed pattern is the normal Unix approach:
+## Short assessment
 
-```sh
-* * * * * cd "/path/to/directory" && flock -n /tmp/warc_backup.lock /path/to/uv run --env-file "../.env" ./the_script.py
-```
+- **Good for visibility**: it tells you, in the operator-facing control surface, that a collection or run appears active.
+- **Useful as a soft gate**: a local/manual run could inspect the field and decide whether to proceed, warn, or exit.
+- **Not good enough as the sole lock**: the spreadsheet is explicitly framed in the project plan as **reporting/control, not correctness**, and that matters here.
 
-## Short version
+So my recommendation is:
 
-- **Yes**: this can satisfy the project’s current `lock and cron wrapper hardening` need.
-- **No Python changes are strictly required** if your goal is just "do not let cron start a second copy while the first is still running."
-- **This is a good fit** for the plan’s operational-hardening note: `use a lock so runs do not overlap`.
+- keep a **host-local hard lock** such as `flock` for true overlap prevention
+- optionally add a **spreadsheet status check** as a polite coordination layer for manual/local invocations
 
-## What this protects against
+## Why the spreadsheet-status idea helps
 
-This protects against the common cron case:
+This approach addresses one real weakness in a pure cron-wrapper `flock` design:
 
-- minute `N` starts a run
-- minute `N+1` fires before the first run finishes
-- `flock -n` refuses the second run
+- `flock` protects only callers that use the wrapper
+- a local/manual run can otherwise bypass that protection entirely
 
-That is probably the main thing you want right now.
+If a local run checks `Status-Main` first, it can notice that the cron job already marked a collection as something like:
 
-## Important caveats
+- `discovery-in-progress`
+- `downloading-in-progress`
 
-A few boundaries are worth being explicit about.
+and then decide not to interfere.
 
-### 1. This is host-local only
+That is valuable because it extends coordination into the same operator-visible system you already plan to update.
 
-This works if there is **one machine** running the cron job.
+## Main weakness of spreadsheet status as the lock
 
-It does **not** coordinate across:
+I would be cautious about relying on it alone.
 
-- multiple hosts
-- containers on different hosts
-- separate schedulers that do not share the same lock file semantics
+### Problem 1: stale status
 
-For this project, that is probably fine if your backup job runs in one cron environment on one box.
+If a run crashes after setting `Status-Main` to an in-progress value, a later run may incorrectly think work is still active.
 
-### 2. It only protects entry through that wrapper
+You can reduce this with timestamps or heartbeat-like updates, but once you do that, you are building a lightweight distributed lock protocol in a spreadsheet.
 
-If someone manually runs:
+That is possible, but it is more fragile than a local OS lock.
 
-```sh
-uv run --env-file "../.env" ./the_script.py
-```
+### Problem 2: race window
 
-that manual run will **not** be blocked unless they also use the same `flock` wrapper.
+Two invocations can both read the sheet before either writes the in-progress marker.
 
-So the real rule becomes:
+Without an atomic compare-and-set mechanism, both may proceed.
 
-- all production invocations must go through the locking wrapper
+That means spreadsheet-only gating is better as:
 
-If that is acceptable operationally, script-level locking is unnecessary.
+- advisory
+- operationally helpful
 
-### 3. You may want logging for skipped runs
+but weaker as a correctness guarantee.
 
-With plain `flock -n`, the overlapping invocation just exits immediately.
+### Problem 3: spreadsheet availability should not define correctness
 
-That is fine, but operationally it can be helpful to log that a run was skipped because the lock was already held. That does **not** require Python changes; it can be done in shell if you want later.
+Per the plan, the filesystem and `state.json` are the source of truth, while the spreadsheet is mainly reporting/control.
 
-### 4. Use a stable lock path
+If the sheet is temporarily unavailable, you probably do not want your only overlap-prevention mechanism to disappear.
 
-Use one predictable lock file path for this script, for example:
+## Recommendation on your proposed approach
 
-```sh
-/tmp/warc_backup.lock
-```
+I think this is a **good addition**, with one adjustment:
 
-or possibly a slightly more specific name if you expect multiple related jobs.
+- do **not** make `Status-Main` the only guard
+- use it as a **soft interlock plus operator signal**
 
-## Recommendation
+A good policy would be:
 
-For the current project stage, I’d recommend:
+1. cron invocation acquires `flock`
+2. cron run writes spreadsheet in-progress status
+3. local/manual run checks spreadsheet status before doing work
+4. if spreadsheet says a run is active, local run exits or requires an explicit override
 
-- use the cron-level `flock` wrapper
-- do **not** add Python lock code yet
-- document that all scheduled/manual production runs should use the same wrapper
+That gives you both:
 
-That keeps the script simpler and matches the project’s current MVP direction.
+- hard protection against overlapping cron runs on one host
+- human-visible protection against accidental manual interference
 
-## Suggested conclusion
+## Alternative 1: local lock file as the actual gate for both cron and manual runs
 
-So my answer is:
+This is the cleanest alternative if your concern is: "allow cron to exist, but ensure a local run behaves properly."
 
-- **Yes, you can avoid adding lock code to the script itself** and rely on cron-wrapper `flock` instead.
-- **That is a reasonable implementation of step 13** in the current plan, as long as you are protecting a single-host cron job and you ensure the script is normally invoked through that wrapper.
+The idea:
 
-## One small command note
+- put the lock in one shared wrapper or one small lock helper
+- require **both** cron and manual/local runs to use the same lock path
 
-Your example shape is fine. In many environments, people often write it like:
+Examples:
 
-```sh
-* * * * * flock -n /tmp/warc_backup.lock sh -c 'cd "/path/to/directory" && /path/to/uv run --env-file "../.env" ./the_script.py'
-```
+- cron uses `flock -n /tmp/warc_backup.lock ...`
+- manual run uses the exact same wrapper command
 
-That keeps the lock around the whole shell command explicitly.
+Why this is strong:
 
-Your version may still work fine in practice, but the `sh -c 'cd ... && run ...'` form makes the lock scope very clear: the lock covers both the directory change context and the script execution as one wrapped command.
+- it is an actual OS-level mutual exclusion mechanism
+- it avoids spreadsheet race/staleness problems
+- it keeps the spreadsheet in its intended role: status/reporting
 
-## Bottom line
+Main limitation:
 
-- **Yes, cron-level `flock` is enough for now.**
-- **No in-script locking is required unless you want protection against non-wrapper/manual invocations too.**
+- it only works cleanly when both invocations happen on the same host and honor the same wrapper
+
+For this project, that still seems like the most practical MVP answer.
+
+## Alternative 2: explicit run mode policy for local runs
+
+Another approach is to add a small policy layer in the script, such as:
+
+- default local behavior: refuse to run if spreadsheet status indicates active processing
+- optional override flag: run anyway
+
+For example, conceptually:
+
+- normal local run: checks sheet, exits if `Status-Main` is in an active state
+- override local run: `--force` or similar bypasses that check
+
+Why this helps:
+
+- it makes local behavior predictable
+- it prevents accidental collisions
+- it still allows an intentional operator override when the spreadsheet status is stale
+
+Why I like this more than spreadsheet-only locking:
+
+- the spreadsheet becomes a decision input, not the sole source of truth
+- you can document the policy clearly
+- stale status is recoverable by explicit operator intent
+
+## Best-fit option for this project right now
+
+Given the current plan, I think the best near-term design is:
+
+- **Primary guard**: `flock` in the cron/manual wrapper
+- **Secondary guard**: spreadsheet `Status-Main` check for manual/local runs
+- **Operator escape hatch**: an explicit override for stale-status situations
+
+That aligns well with the plan’s current architecture:
+
+- lock/cron hardening remains simple
+- spreadsheet stays a control/reporting surface
+- local filesystem state remains the source of truth
+
+## Practical bottom line
+
+- **Your spreadsheet-status idea is good as a soft coordination mechanism.**
+- **I would not rely on it alone for overlap prevention.**
+- **The strongest practical MVP is `flock` for hard locking, plus a spreadsheet active-status check to decide whether a local run should proceed.**
+
+If you want the shortest recommendation:
+
+- use `flock` to guarantee no same-host overlap
+- use `Status-Main` to let a local run detect that cron is already in progress
+- allow an explicit override when the sheet status is stale
