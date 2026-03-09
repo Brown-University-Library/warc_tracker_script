@@ -21,6 +21,7 @@ class DownloadResult:
 def build_partial_download_path(destination_path: Path) -> Path:
     """
     Builds the partial-download path for one final destination.
+    Called by: download_to_path()
     """
     result = destination_path.with_name(f'{destination_path.name}.partial')
     return result
@@ -34,6 +35,7 @@ def download_to_path(
 ) -> DownloadResult:
     """
     Streams one remote file to a local destination using a partial file and atomic rename.
+    Called by: run_planned_downloads()
     """
     partial_path = build_partial_download_path(destination_path)
     destination_path.parent.mkdir(parents=True, exist_ok=True)

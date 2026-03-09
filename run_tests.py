@@ -19,6 +19,7 @@ from pathlib import Path
 def build_test_suite(targets: list[str], webapp_root: Path) -> unittest.TestSuite:
     """
     Builds a test suite from provided targets or via discovery.
+    Called by: main()
     """
     loader = unittest.TestLoader()
     if targets:
@@ -33,6 +34,7 @@ def build_test_suite(targets: list[str], webapp_root: Path) -> unittest.TestSuit
 def run_test_suite(test_suite: unittest.TestSuite, verbosity: int) -> int:
     """
     Runs a test suite and returns the failure count.
+    Called by: main()
     """
     runner = unittest.TextTestRunner(verbosity=verbosity)
     result = runner.run(test_suite)
@@ -45,6 +47,7 @@ def main() -> None:
     - Uses standard library unittest (per AGENTS.md)
     - Uses Django's test runner so app-based tests (e.g., `pdf_checker_app/tests/`) are discovered
     - Sets top-level directory to the webapp root so `lib/` is importable
+    Called by: __main__
     """
     ## set up argparser ---------------------------------------------
     parser = argparse.ArgumentParser(description='Run webapp tests')

@@ -74,6 +74,7 @@ class BlockingCoordinationSummary:
 def format_downloaded_size_gb(size_bytes: int) -> str:
     """
     Formats a byte count as gigabytes rounded to one decimal place.
+    Called by: build_collection_summary_update()
     """
     size_gb = size_bytes / (1024**3)
     result = f'{size_gb:.1f} GB'
@@ -129,6 +130,7 @@ def get_archive_it_credentials() -> tuple[str, str] | None:
 def get_run_coordination_mode() -> str | None:
     """
     Returns the configured startup coordination mode when present.
+    Called by: run_collection_orchestration()
     """
     configured_mode = os.getenv('RUN_COORDINATION_MODE')
     result: str | None = None
@@ -142,6 +144,7 @@ def get_run_coordination_mode() -> str | None:
 def should_skip_spreadsheet_coordination_check(coordination_mode: str | None) -> bool:
     """
     Returns whether startup spreadsheet coordination preflight should be skipped.
+    Called by: enforce_startup_run_coordination()
     """
     result = coordination_mode == RUN_COORDINATION_MODE_CRON_LOCKED
     return result
@@ -154,6 +157,7 @@ def get_blocking_coordination_summary(
 ) -> BlockingCoordinationSummary | None:
     """
     Returns blocking in-progress spreadsheet statuses for the active collection-job surface.
+    Called by: enforce_startup_run_coordination()
     """
     blocking_collection_ids: list[int] = []
     blocking_statuses: set[str] = set()
@@ -196,6 +200,7 @@ def enforce_startup_run_coordination(
 ) -> None:
     """
     Enforces the startup spreadsheet coordination policy for non-cron_locked runs.
+    Called by: run_collection_orchestration()
     """
     log.info('Resolved startup coordination mode: %s', coordination_mode or '<unset>')
     if should_skip_spreadsheet_coordination_check(coordination_mode):
@@ -479,6 +484,7 @@ def persist_planned_downloads_to_state(
 def build_collection_status_update(status_main: str, status_detail: str) -> CollectionProcessingStatusUpdate:
     """
     Builds a collection-level processing status payload.
+    Called by: write_collection_start_status()
     """
     result = CollectionProcessingStatusUpdate(
         processing_status_main=status_main,
@@ -495,6 +501,7 @@ def write_collection_status_update(
 ) -> None:
     """
     Writes one collection-level processing status update to the spreadsheet.
+    Called by: write_collection_start_status()
     """
     update_collection_processing_status(worksheet, header_location, collection_job.row_number, status_update)
 
@@ -502,6 +509,7 @@ def write_collection_status_update(
 def build_download_planning_status(planned_download_count: int) -> CollectionProcessingStatusUpdate:
     """
     Builds the collection-level status update written after download planning completes.
+    Called by: write_collection_download_planning_status()
     """
     result = build_collection_status_update(
         STATUS_DOWNLOAD_PLANNING_COMPLETE,
@@ -513,6 +521,7 @@ def build_download_planning_status(planned_download_count: int) -> CollectionPro
 def build_no_new_files_status(discovery_completed_at: str) -> CollectionProcessingStatusUpdate:
     """
     Builds the collection-level status update written when no downloads are needed.
+    Called by: write_collection_no_new_files_status()
     """
     result = build_collection_status_update(
         STATUS_NO_NEW_FILES_TO_DOWNLOAD,
@@ -524,6 +533,7 @@ def build_no_new_files_status(discovery_completed_at: str) -> CollectionProcessi
 def build_download_start_status(total_planned_downloads: int) -> CollectionProcessingStatusUpdate:
     """
     Builds the initial collection-level download-in-progress status update.
+    Called by: write_collection_download_start_status()
     """
     result = build_collection_status_update(
         STATUS_DOWNLOADING_IN_PROGRESS,
@@ -535,6 +545,7 @@ def build_download_start_status(total_planned_downloads: int) -> CollectionProce
 def build_download_progress_detail(percent_complete: int, completed_count: int, total_count: int) -> str:
     """
     Builds compact progress-detail text for one download milestone.
+    Called by: get_download_progress_milestone_update()
     """
     result = f'{percent_complete}% ({completed_count}/{total_count} files)'
     return result
@@ -547,6 +558,7 @@ def get_download_progress_milestone_update(
 ) -> tuple[int, str | None]:
     """
     Returns the next coarse progress milestone text, if a new milestone has been reached.
+    Called by: run_planned_downloads()
     """
     next_reported_percent = last_reported_percent
     progress_detail: str | None = None
@@ -734,6 +746,7 @@ def log_collection_download_summary(
 def iter_collection_warc_paths(storage_root: Path, collection_id: int) -> list[Path]:
     """
     Returns downloaded WARC paths currently present on disk for one collection.
+    Called by: get_collection_downloaded_totals()
     """
     collection_root = storage_root / 'collections' / str(collection_id)
     warc_root = collection_root / 'warcs'
@@ -746,6 +759,7 @@ def iter_collection_warc_paths(storage_root: Path, collection_id: int) -> list[P
 def get_collection_downloaded_totals(storage_root: Path, collection_id: int) -> tuple[int, int]:
     """
     Returns the total downloaded WARC count and byte size currently present for one collection.
+    Called by: build_collection_summary_update()
     """
     warc_paths = iter_collection_warc_paths(storage_root, collection_id)
     total_count = len(warc_paths)
@@ -767,6 +781,7 @@ def build_collection_summary_update(
 ) -> CollectionSummaryUpdate:
     """
     Builds final spreadsheet summary-field values for one collection.
+    Called by: build_collection_final_report()
     """
     collection_root = storage_root / 'collections' / str(collection_id)
     total_downloaded_count, total_downloaded_size = get_collection_downloaded_totals(storage_root, collection_id)
@@ -789,6 +804,7 @@ def build_collection_final_report(
 ) -> CollectionProcessingReport:
     """
     Builds the final collection status and summary payload for spreadsheet reporting.
+    Called by: process_collection_job()
     """
     failure_count = sum(1 for result in download_results if not result.success)
     failure_count += sum(1 for result in fixity_results if not result.success)
@@ -824,6 +840,7 @@ def build_collection_failure_report(
 ) -> CollectionProcessingReport:
     """
     Builds a failure-oriented spreadsheet report for collection-level processing exceptions.
+    Called by: run_collection_orchestration()
     """
     result = CollectionProcessingReport(
         status_update=CollectionProcessingStatusUpdate(
@@ -846,6 +863,7 @@ def determine_collection_discovery_mode(
 ) -> tuple[str, datetime | None]:
     """
     Determines the collection discovery mode and optional store-time-after boundary.
+    Called by: process_collection_job()
     """
     discovery_mode = DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN
     after_datetime: datetime | None = None
@@ -865,6 +883,7 @@ def write_collection_start_status(
 ) -> None:
     """
     Writes the collection-level start status before discovery begins.
+    Called by: process_collection_job()
     """
     status_detail = 'full historical backfill'
     if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
@@ -881,6 +900,7 @@ def write_collection_download_planning_status(
 ) -> None:
     """
     Writes the collection-level status after download planning completes.
+    Called by: process_collection_job()
     """
     status_update = build_download_planning_status(planned_download_count)
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
@@ -894,6 +914,7 @@ def write_collection_no_new_files_status(
 ) -> None:
     """
     Writes the collection-level status for a no-op collection after planning.
+    Called by: process_collection_job()
     """
     status_update = build_no_new_files_status(discovery_completed_at)
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
@@ -907,6 +928,7 @@ def write_collection_download_start_status(
 ) -> None:
     """
     Writes the collection-level status when sequential downloading begins.
+    Called by: process_collection_job()
     """
     status_update = build_download_start_status(total_planned_downloads)
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
@@ -920,6 +942,7 @@ def write_collection_download_progress_status(
 ) -> None:
     """
     Writes one coarse collection-level download progress milestone.
+    Called by: process_collection_job.<lambda>()
     """
     status_update = build_collection_status_update(STATUS_DOWNLOADING_IN_PROGRESS, progress_detail)
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
@@ -933,6 +956,7 @@ def write_collection_final_report(
 ) -> None:
     """
     Writes the final collection-level status and summary fields.
+    Called by: process_collection_job()
     """
     update_collection_final_reporting(
         worksheet,
@@ -1114,6 +1138,7 @@ class DownloadNeedEvaluation:
 def get_manifest_expected_size(state: dict[str, object], filename: str) -> int | None:
     """
     Returns the expected size for one filename when current manifest data provides it.
+    Called by: evaluate_planned_download_need()
     """
     files_value = state.get('files')
     files_state = files_value if isinstance(files_value, dict) else {}
@@ -1142,6 +1167,7 @@ def evaluate_planned_download_need(
 ) -> DownloadNeedEvaluation:
     """
     Evaluates whether one planned candidate still requires backup work now.
+    Called by: build_evaluated_active_downloads()
     """
     warc_path = planned_download.planned_paths.warc_path
     if not warc_path.exists():
@@ -1175,6 +1201,7 @@ def build_evaluated_active_downloads(
 ) -> tuple[list[PlannedDownload], dict[str, int]]:
     """
     Builds the evaluated active-download list and a summary of evaluation reasons.
+    Called by: process_collection_job()
     """
     active_downloads: list[PlannedDownload] = []
     reason_counts: dict[str, int] = {}
@@ -1195,6 +1222,7 @@ def log_active_download_evaluation_counts(
 ) -> None:
     """
     Logs the merged-versus-evaluated planning counts and evaluation reasons.
+    Called by: process_collection_job()
     """
     log.info(
         'Collection %s evaluation kept %s of %s merged candidates as active downloads. Reason counts: %s',

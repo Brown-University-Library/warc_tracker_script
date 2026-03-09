@@ -57,6 +57,7 @@ def run_collection_orchestration(
 ) -> None:
     """
     Runs the current sequential collection orchestration flow.
+    Called by: main()
     """
     sheet_context = load_collection_sheet_context(spreadsheet_id)
     collection_jobs = sheet_context.collection_jobs
@@ -127,6 +128,7 @@ def run_collection_orchestration(
 def main() -> None:
     """
     Orchestrates the current sheet, state, and WASAPI discovery flow.
+    Called by: __main__
     """
     log.info('\n\nstarting-processing')
     ## get environment variables ------------------------------------

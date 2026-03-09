@@ -54,6 +54,7 @@ class DiscoveryResult:
 def parse_wasapi_datetime(value: str) -> datetime:
     """
     Parses a WASAPI datetime string into an aware UTC datetime.
+    Called by: compute_store_time_after_datetime()
     """
     normalized = value.strip()
     if normalized.endswith('Z'):
@@ -72,6 +73,7 @@ def compute_store_time_after_datetime(
 ) -> datetime:
     """
     Computes the store-time-after boundary using the overlap window.
+    Called by: determine_collection_discovery_mode()
     """
     reference_datetime = now.astimezone(UTC)
     if checkpoint_store_time_max is not None:
@@ -83,6 +85,7 @@ def compute_store_time_after_datetime(
 def format_wasapi_datetime(value: datetime) -> str:
     """
     Formats an aware datetime in the UTC form expected by WASAPI query params.
+    Called by: fetch_collection_discovery()
     """
     utc_value = value.astimezone(UTC)
     result = utc_value.strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -92,6 +95,7 @@ def format_wasapi_datetime(value: datetime) -> str:
 def extract_discovery_records(page_payload: dict[str, object]) -> list[dict[str, object]]:
     """
     Extracts record payloads from one WASAPI page.
+    Called by: fetch_collection_discovery()
     """
     records: list[dict[str, object]] | None = None
     for field_name in RECORD_LIST_FIELD_CANDIDATES:
@@ -112,6 +116,7 @@ def extract_discovery_records(page_payload: dict[str, object]) -> list[dict[str,
 def extract_record_store_time(record: dict[str, object]) -> str | None:
     """
     Extracts a usable store-time string from one record when present.
+    Called by: compute_max_store_time()
     """
     result: str | None = None
     candidate = record.get('store-time')
@@ -125,6 +130,7 @@ def extract_record_store_time(record: dict[str, object]) -> str | None:
 def compute_max_store_time(records: list[dict[str, object]]) -> str | None:
     """
     Computes the maximum usable store-time across discovered records.
+    Called by: fetch_collection_discovery()
     """
     max_datetime: datetime | None = None
     max_store_time: str | None = None
@@ -144,6 +150,7 @@ def compute_max_store_time(records: list[dict[str, object]]) -> str | None:
 def get_next_page_number(page_payload: dict[str, object], current_page_number: int) -> int | None:
     """
     Determines the next page number from a WASAPI page payload.
+    Called by: fetch_collection_discovery()
     """
     result: int | None = None
     next_value = page_payload.get('next')
@@ -166,6 +173,7 @@ def get_next_page_number(page_payload: dict[str, object], current_page_number: i
 def build_payload_debug_summary(page_payload: dict[str, object], page_records: list[dict[str, object]]) -> dict[str, object]:
     """
     Builds a compact summary of one WASAPI response payload for debug logging.
+    Called by: fetch_collection_discovery()
     """
     result = {
         'keys': sorted(page_payload.keys()),
@@ -187,6 +195,7 @@ def fetch_collection_discovery(
 ) -> DiscoveryResult:
     """
     Fetches paginated WASAPI discovery records for one collection.
+    Called by: process_collection_job()
     """
     page_number = 1
     discovered_records: list[dict[str, object]] = []

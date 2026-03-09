@@ -115,6 +115,7 @@ class CollectionSummaryUpdate:
 def load_gsheet_credentials() -> dict[str, str]:
     """
     Loads service-account credentials from the environment.
+    Called by: get_gspread_client()
     """
     credentials_json = os.getenv('GSHEET_CREDENTIALS_JSON')
     if not credentials_json:
@@ -127,6 +128,7 @@ def load_gsheet_credentials() -> dict[str, str]:
 def get_gspread_client(*, read_only: bool = True) -> gspread.Client:
     """
     Returns a gspread client authorized for read-only or read-write access.
+    Called by: get_collection_worksheet()
     """
     credentials_data = load_gsheet_credentials()
     scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
@@ -140,6 +142,7 @@ def get_gspread_client(*, read_only: bool = True) -> gspread.Client:
 def get_collection_worksheet(spreadsheet_id: str, *, read_only: bool = True) -> gspread.Worksheet:
     """
     Returns the collection-level worksheet from the spreadsheet.
+    Called by: fetch_collection_jobs()
     """
     client = get_gspread_client(read_only=read_only)
     spreadsheet = client.open_by_key(spreadsheet_id)
@@ -150,6 +153,7 @@ def get_collection_worksheet(spreadsheet_id: str, *, read_only: bool = True) -> 
 def normalize_header_value(value: str) -> str:
     """
     Normalizes header values for matching against known aliases.
+    Called by: locate_header_row()
     """
     collapsed = ' '.join(value.strip().split())
     normalized = collapsed.replace(' / ', '/').replace(' /', '/').replace('/ ', '/')
@@ -160,6 +164,7 @@ def normalize_header_value(value: str) -> str:
 def locate_header_row(values: list[list[str]]) -> HeaderLocation | None:
     """
     Locates the header row and returns its column map.
+    Called by: parse_collection_jobs()
     """
     result: HeaderLocation | None = None
     alias_to_field: dict[str, str] = {}
@@ -185,6 +190,7 @@ def locate_header_row(values: list[list[str]]) -> HeaderLocation | None:
 def parse_collection_id(value: str | None) -> int | None:
     """
     Parses a collection id value into an integer if possible.
+    Called by: parse_collection_jobs()
     """
     result: int | None = None
     if value is not None:
@@ -207,6 +213,7 @@ def parse_collection_id(value: str | None) -> int | None:
 def parse_collection_jobs(values: list[list[str]]) -> list[CollectionJob]:
     """
     Parses collection jobs from a sheet value grid.
+    Called by: fetch_collection_jobs()
     """
     header_location = locate_header_row(values)
     result: list[CollectionJob] = []
@@ -248,6 +255,7 @@ def parse_collection_jobs(values: list[list[str]]) -> list[CollectionJob]:
 def get_row_cell(row: list[str], column_index: int | None) -> str | None:
     """
     Returns the cell value for a row at the given column index.
+    Called by: parse_collection_jobs()
     """
     result: str | None = None
     if column_index is not None and column_index < len(row):
@@ -257,19 +265,21 @@ def get_row_cell(row: list[str], column_index: int | None) -> str | None:
     return result
 
 
-def fetch_collection_jobs(spreadsheet_id: str) -> list[CollectionJob]:
-    """
-    Fetches active collection jobs from the collection-level worksheet.
-    """
-    worksheet = get_collection_worksheet(spreadsheet_id)
-    values = worksheet.get_all_values()
-    result = parse_collection_jobs(values)
-    return result
+# def fetch_collection_jobs(spreadsheet_id: str) -> list[CollectionJob]:
+#     """
+#     Fetches active collection jobs from the collection-level worksheet.
+#     Called by: no_production_caller()
+#     """
+#     worksheet = get_collection_worksheet(spreadsheet_id)
+#     values = worksheet.get_all_values()
+#     result = parse_collection_jobs(values)
+#     return result
 
 
 def validate_required_reporting_fields(header_location: HeaderLocation) -> None:
     """
     Validates that the required reporting columns exist in the worksheet header.
+    Called by: load_collection_sheet_context()
     """
     missing_fields = [field_name for field_name in REQUIRED_REPORTING_FIELDS if field_name not in header_location.column_map]
     if missing_fields:
@@ -280,6 +290,7 @@ def validate_required_reporting_fields(header_location: HeaderLocation) -> None:
 def load_collection_sheet_context(spreadsheet_id: str) -> CollectionSheetContext:
     """
     Loads the collection worksheet, validates the reporting contract, and parses active collection jobs.
+    Called by: run_collection_orchestration()
     """
     worksheet = get_collection_worksheet(spreadsheet_id, read_only=False)
     values = worksheet.get_all_values()
@@ -304,6 +315,7 @@ def build_collection_status_cell_updates(
 ) -> list[dict[str, str]]:
     """
     Builds worksheet cell updates for collection status fields.
+    Called by: update_collection_processing_status()
     """
     result = [
         {
@@ -325,6 +337,7 @@ def build_collection_summary_cell_updates(
 ) -> list[dict[str, str]]:
     """
     Builds worksheet cell updates for collection summary fields.
+    Called by: update_collection_final_reporting()
     """
     summary_values = {
         'summary_status_last_wasapi_check': summary_update.summary_status_last_wasapi_check,
@@ -351,6 +364,7 @@ def update_collection_processing_status(
 ) -> None:
     """
     Updates the collection row with the current processing status fields.
+    Called by: write_collection_status_update()
     """
     cell_updates = build_collection_status_cell_updates(header_location, row_number, status_update)
     worksheet.batch_update(cell_updates)
@@ -365,6 +379,7 @@ def update_collection_final_reporting(
 ) -> None:
     """
     Updates the collection row with final status and summary fields.
+    Called by: write_collection_final_report()
     """
     cell_updates = build_collection_status_cell_updates(header_location, row_number, status_update)
     cell_updates.extend(build_collection_summary_cell_updates(header_location, row_number, summary_update))

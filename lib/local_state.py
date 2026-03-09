@@ -12,6 +12,7 @@ REQUIRED_TOP_LEVEL_DEFAULTS: dict[str, object] = {
 def build_attempt_timestamp() -> str:
     """
     Builds the current UTC timestamp for manifest attempt tracking.
+    Called by: update_file_manifest_for_download_result()
     """
     result = datetime.now(timezone.utc).isoformat()
     return result
@@ -26,6 +27,7 @@ class LocalStateError(RuntimeError):
 def build_collection_root_path(storage_root: Path, collection_id: int) -> Path:
     """
     Builds the collection root path under the configured storage root.
+    Called by: build_state_file_path()
     """
     result = storage_root / 'collections' / str(collection_id)
     return result
@@ -34,6 +36,7 @@ def build_collection_root_path(storage_root: Path, collection_id: int) -> Path:
 def build_state_file_path(storage_root: Path, collection_id: int) -> Path:
     """
     Builds the state.json path for one collection.
+    Called by: load_collection_state()
     """
     collection_root_path = build_collection_root_path(storage_root, collection_id)
     result = collection_root_path / 'state.json'
@@ -43,6 +46,7 @@ def build_state_file_path(storage_root: Path, collection_id: int) -> Path:
 def make_default_collection_state() -> dict[str, object]:
     """
     Builds the default in-memory collection state structure.
+    Called by: load_collection_state()
     """
     result = {
         'enumeration_checkpoint_store_time_max': None,
@@ -54,6 +58,7 @@ def make_default_collection_state() -> dict[str, object]:
 def normalize_collection_state(state: dict[str, object]) -> dict[str, object]:
     """
     Normalizes a loaded collection state and fills missing required keys.
+    Called by: get_file_manifest_entry()
     """
     result = dict(state)
     for key, default_value in REQUIRED_TOP_LEVEL_DEFAULTS.items():
@@ -72,6 +77,7 @@ def normalize_collection_state(state: dict[str, object]) -> dict[str, object]:
 def get_file_manifest_entry(state: dict[str, object], filename: str) -> dict[str, object]:
     """
     Returns the mutable manifest entry for one filename, creating it when absent.
+    Called by: update_file_manifest_for_planned_download()
     """
     normalized_state = normalize_collection_state(state)
     files_value = normalized_state['files']
@@ -96,6 +102,7 @@ def update_file_manifest_for_planned_download(
 ) -> dict[str, object]:
     """
     Updates one file manifest entry with durable pre-download planning metadata.
+    Called by: persist_planned_downloads_to_state()
     """
     entry = get_file_manifest_entry(state, filename)
     entry['source_url'] = source_url
@@ -118,6 +125,7 @@ def update_file_manifest_for_download_result(
 ) -> dict[str, object]:
     """
     Updates one file manifest entry with the durable download outcome.
+    Called by: run_planned_downloads()
     """
     entry = get_file_manifest_entry(state, filename)
     current_error_count = entry.get('error_count', 0)
@@ -148,6 +156,7 @@ def update_file_manifest_for_fixity_result(
 ) -> dict[str, object]:
     """
     Updates one file manifest entry with the durable fixity outcome.
+    Called by: run_planned_downloads()
     """
     entry = get_file_manifest_entry(state, filename)
     current_error_count = entry.get('error_count', 0)
@@ -171,6 +180,7 @@ def update_file_manifest_for_fixity_result(
 def load_collection_state(storage_root: Path, collection_id: int) -> dict[str, object]:
     """
     Loads collection state from disk or returns the default state when absent.
+    Called by: process_collection_job()
     """
     state_file_path = build_state_file_path(storage_root, collection_id)
     if not state_file_path.exists():
@@ -189,6 +199,7 @@ def load_collection_state(storage_root: Path, collection_id: int) -> dict[str, o
 def save_collection_state(storage_root: Path, collection_id: int, state: dict[str, object]) -> Path:
     """
     Saves collection state to disk using an atomic replace.
+    Called by: save_collection_state_after_file_processing()
     """
     normalized_state = normalize_collection_state(state)
     state_file_path = build_state_file_path(storage_root, collection_id)

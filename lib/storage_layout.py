@@ -1,6 +1,6 @@
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from lib.local_state import build_collection_root_path
 
@@ -30,6 +30,7 @@ class PlannedCollectionPaths:
 def extract_warc_timestamp_parts(filename: str) -> tuple[str, str]:
     """
     Extracts the year and month partitions from a WARC filename timestamp.
+    Called by: build_warc_destination_path()
     """
     normalized_filename = filename.strip()
     if not normalized_filename:
@@ -44,6 +45,7 @@ def extract_warc_timestamp_parts(filename: str) -> tuple[str, str]:
 def build_collection_storage_root(storage_root: Path, collection_id: int) -> Path:
     """
     Builds the collection root path for downloaded WARC content.
+    Called by: build_warc_destination_path()
     """
     result = build_collection_root_path(storage_root, collection_id)
     return result
@@ -52,6 +54,7 @@ def build_collection_storage_root(storage_root: Path, collection_id: int) -> Pat
 def build_warc_destination_path(storage_root: Path, collection_id: int, filename: str) -> Path:
     """
     Builds the destination path for one WARC file.
+    Called by: plan_collection_paths()
     """
     year, month = extract_warc_timestamp_parts(filename)
     collection_root = build_collection_storage_root(storage_root, collection_id)
@@ -62,6 +65,7 @@ def build_warc_destination_path(storage_root: Path, collection_id: int, filename
 def build_fixity_paths(storage_root: Path, collection_id: int, filename: str) -> tuple[Path, Path]:
     """
     Builds the fixity sidecar paths for one WARC file.
+    Called by: plan_collection_paths()
     """
     year, month = extract_warc_timestamp_parts(filename)
     collection_root = build_collection_storage_root(storage_root, collection_id)
@@ -73,6 +77,7 @@ def build_fixity_paths(storage_root: Path, collection_id: int, filename: str) ->
 def plan_collection_paths(storage_root: Path, collection_id: int, filename: str) -> PlannedCollectionPaths:
     """
     Builds the planned local WARC and fixity paths for one filename.
+    Called by: build_planned_download_paths()
     """
     year, month = extract_warc_timestamp_parts(filename)
     warc_path = build_warc_destination_path(storage_root, collection_id, filename)

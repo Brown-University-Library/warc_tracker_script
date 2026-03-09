@@ -32,6 +32,7 @@ from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwrigh
 def parse_args() -> argparse.Namespace:
     """
     Parses command-line arguments.
+    Called by: main()
     """
     parser = argparse.ArgumentParser(
         description=(
@@ -138,6 +139,7 @@ def parse_args() -> argparse.Namespace:
 def validate_args(args: argparse.Namespace) -> None:
     """
     Validates command-line arguments.
+    Called by: main()
     """
     clip_values: list[int | None] = [
         args.clip_x,
@@ -155,6 +157,7 @@ def validate_args(args: argparse.Namespace) -> None:
 def ensure_directory(path: Path) -> None:
     """
     Ensures a directory exists.
+    Called by: run_loop()
     """
     path.mkdir(parents=True, exist_ok=True)
 
@@ -168,6 +171,7 @@ def launch_context(
 ) -> BrowserContext:
     """
     Launches a persistent Chromium context.
+    Called by: run_loop()
     """
     context: BrowserContext = playwright.chromium.launch_persistent_context(
         user_data_dir=str(profile_dir),
@@ -180,6 +184,7 @@ def launch_context(
 def get_page(context: BrowserContext) -> Page:
     """
     Returns the first page in the context, creating one if needed.
+    Called by: run_loop()
     """
     page: Page
     if context.pages:
@@ -192,6 +197,7 @@ def get_page(context: BrowserContext) -> Page:
 def build_output_path(output_dir: Path, prefix: str) -> Path:
     """
     Builds a timestamped output path.
+    Called by: capture_once()
     """
     timestamp: str = datetime.now().strftime('%Y%m%d_%H%M%S')
     output_path: Path = output_dir / f'{prefix}_{timestamp}.png'
@@ -201,6 +207,7 @@ def build_output_path(output_dir: Path, prefix: str) -> Path:
 def focus_sheet_area(page: Page, width: int, height: int) -> None:
     """
     Clicks near the middle of the viewport so wheel-scrolling affects the sheet.
+    Called by: apply_scroll()
     """
     click_x: int = max(100, width // 2)
     click_y: int = max(100, height // 2)
@@ -210,6 +217,7 @@ def focus_sheet_area(page: Page, width: int, height: int) -> None:
 def apply_scroll(page: Page, width: int, height: int, scroll_x: int, scroll_y: int) -> None:
     """
     Applies mouse-wheel scrolling after focusing the sheet area.
+    Called by: capture_once()
     """
     if scroll_x != 0 or scroll_y != 0:
         focus_sheet_area(page, width, height)
@@ -227,6 +235,7 @@ def screenshot_page(
 ) -> None:
     """
     Saves a screenshot to disk.
+    Called by: capture_once()
     """
     if clip_x is None:
         page.screenshot(path=str(output_path))
@@ -260,6 +269,7 @@ def capture_once(
 ) -> Path:
     """
     Loads the sheet and captures one screenshot.
+    Called by: run_loop()
     """
     timeout_ms: int = int(page_timeout_seconds * 1000)
     settle_ms: int = int(settle_seconds * 1000)
@@ -283,6 +293,7 @@ def capture_once(
 def run_loop(args: argparse.Namespace) -> None:
     """
     Runs the screenshot capture loop.
+    Called by: main()
     """
     output_dir: Path = Path(args.output_dir).expanduser().resolve()
     profile_dir: Path = Path(args.profile_dir).expanduser().resolve()
@@ -341,6 +352,7 @@ def run_loop(args: argparse.Namespace) -> None:
 def main() -> None:
     """
     Orchestrates argument parsing and execution.
+    Called by: __main__
     """
     args: argparse.Namespace = parse_args()
     validate_args(args)

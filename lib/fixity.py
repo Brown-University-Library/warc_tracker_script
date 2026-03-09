@@ -57,6 +57,7 @@ def build_sidecar_partial_path(path: Path) -> Path:
 def validate_sha256_sidecar_content(sha256_path: Path, warc_path: Path, expected_digest: str) -> bool:
     """
     Validates the checksum-line content of one SHA-256 sidecar.
+    Called by: validate_fixity_sidecars()
     """
     expected_content = f'{expected_digest} *{warc_path.name}'
     content = sha256_path.read_text(encoding='utf-8').strip()
@@ -67,6 +68,7 @@ def validate_sha256_sidecar_content(sha256_path: Path, warc_path: Path, expected
 def validate_json_sidecar_content(json_path: Path, warc_path: Path, expected_digest: str) -> bool:
     """
     Validates the parsed JSON fixity metadata for one WARC file.
+    Called by: validate_fixity_sidecars()
     """
     json_data = json.loads(json_path.read_text(encoding='utf-8'))
     if not isinstance(json_data, dict):
@@ -86,6 +88,7 @@ def validate_fixity_sidecars(
 ) -> FixityValidationResult:
     """
     Validates local fixity sidecars by checking existence, parseability, and checksum consistency.
+    Called by: evaluate_planned_download_need()
     """
     is_valid = False
     error_reason: str | None = None

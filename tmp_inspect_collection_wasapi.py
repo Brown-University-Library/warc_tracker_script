@@ -81,6 +81,7 @@ log = logging.getLogger(__name__)
 def get_archive_it_credentials() -> tuple[str, str]:
     """
     Returns Archive-It credentials from the environment.
+    Called by: main()
     """
     username = os.getenv('ARCHIVEIT_WASAPI_USERNAME') or os.getenv('ARCHIVEIT_USER')
     password = os.getenv('ARCHIVEIT_WASAPI_PASSWORD') or os.getenv('ARCHIVEIT_PASS')
@@ -96,6 +97,7 @@ def get_archive_it_credentials() -> tuple[str, str]:
 def build_output_paths(output_dir: Path, collection_id: int, requested_at: datetime) -> dict[str, Path]:
     """
     Builds the output paths for a collection capture run.
+    Called by: main()
     """
     timestamp = requested_at.strftime('%Y%m%dT%H%M%SZ')
     collection_directory = output_dir / f'collection_{collection_id}' / timestamp
@@ -113,6 +115,7 @@ def build_output_paths(output_dir: Path, collection_id: int, requested_at: datet
 def extract_records_from_page(page_payload: dict[str, object]) -> list[dict[str, object]]:
     """
     Extracts record-like objects from a WASAPI page payload.
+    Called by: fetch_collection_wasapi_pages()
     """
     result: list[dict[str, object]] = []
     for key in ('results', 'files', 'items', 'data'):
@@ -126,6 +129,7 @@ def extract_records_from_page(page_payload: dict[str, object]) -> list[dict[str,
 def get_next_page_number(page_payload: dict[str, object], current_page_number: int) -> int | None:
     """
     Determines the next page number when it can be inferred from the payload.
+    Called by: fetch_collection_wasapi_pages()
     """
     result: int | None = None
     next_value = page_payload.get('next')
@@ -153,6 +157,7 @@ def fetch_collection_wasapi_pages(
 ) -> FetchResult:
     """
     Fetches paginated WASAPI JSON for a single collection.
+    Called by: main()
     """
     pages: list[dict[str, object]] = []
     request_records: list[RequestRecord] = []
@@ -211,6 +216,7 @@ def fetch_collection_wasapi_pages(
 def find_first_string(record: dict[str, object], field_names: tuple[str, ...]) -> str | None:
     """
     Returns the first non-empty string found for the candidate field names.
+    Called by: build_metadata_summary()
     """
     result: str | None = None
     for field_name in field_names:
@@ -224,6 +230,7 @@ def find_first_string(record: dict[str, object], field_names: tuple[str, ...]) -
 def detect_filename_anomalies(filename: str) -> list[str]:
     """
     Detects simple filename/path anomalies for manual review.
+    Called by: build_metadata_summary()
     """
     anomalies: list[str] = []
     if any(character in PATH_UNSAFE_CHARACTERS for character in filename):
@@ -239,6 +246,7 @@ def detect_filename_anomalies(filename: str) -> list[str]:
 def build_metadata_summary(pages: list[dict[str, object]]) -> dict[str, object]:
     """
     Builds a descriptive summary from saved WASAPI pages.
+    Called by: main()
     """
     records: list[dict[str, object]] = []
     for page_payload in pages:
@@ -300,6 +308,7 @@ def build_capture_manifest(
 ) -> dict[str, object]:
     """
     Builds a manifest describing the captured output.
+    Called by: main()
     """
     result = {
         'collection_id': collection_id,
@@ -331,6 +340,7 @@ def build_capture_manifest(
 def write_json(path: Path, payload: dict[str, object]) -> None:
     """
     Writes JSON to disk with stable formatting.
+    Called by: save_raw_wasapi_pages()
     """
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
@@ -338,6 +348,7 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
 def save_raw_wasapi_pages(pages_directory: Path, pages: list[dict[str, object]]) -> list[Path]:
     """
     Saves raw WASAPI JSON pages to disk.
+    Called by: main()
     """
     saved_paths: list[Path] = []
     pages_directory.mkdir(parents=True, exist_ok=True)
@@ -352,6 +363,7 @@ def save_raw_wasapi_pages(pages_directory: Path, pages: list[dict[str, object]])
 def build_summary_markdown(collection_id: int, summary: dict[str, object]) -> str:
     """
     Builds a human-readable markdown summary.
+    Called by: main()
     """
     duplicate_filenames = summary['duplicate_filenames']
     anomaly_examples = summary['filename_anomaly_examples']
@@ -387,6 +399,7 @@ def build_summary_markdown(collection_id: int, summary: dict[str, object]) -> st
 def parse_args() -> argparse.Namespace:
     """
     Parses CLI arguments for the investigative script.
+    Called by: main()
     """
     parser = argparse.ArgumentParser(description='Capture Archive-It WASAPI metadata for one collection.')
     parser.add_argument('--collection-id', required=True, type=int, help='Archive-It collection id to inspect')
@@ -405,6 +418,7 @@ def parse_args() -> argparse.Namespace:
 def configure_logging(log_level_name: str) -> None:
     """
     Configures process logging.
+    Called by: main()
     """
     log_level = getattr(logging, log_level_name.upper(), logging.INFO)
     logging.basicConfig(
@@ -417,6 +431,7 @@ def configure_logging(log_level_name: str) -> None:
 def main() -> None:
     """
     Captures raw WASAPI metadata and derived summaries for one collection.
+    Called by: __main__
     """
     args = parse_args()
     configure_logging(args.log_level)
