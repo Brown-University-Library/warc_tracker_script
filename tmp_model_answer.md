@@ -1,302 +1,163 @@
-# Ideas for making the denominator more accurate / expected
+# Option B for manifest persistence: likely the better fit
 
-I reviewed:
-- `warc_tracker_script/AGENTS.md`
-- `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
-- `warc_tracker_script/tmp_recent_prompt.md`
-- `warc_tracker_script/tmp_model_answer.md`
+I reviewed your proposed direction against the current plan and the project’s state/reporting model.
 
 ## Short answer
 
-Yes, your idea of an early filesystem check is a reasonable and fairly simple option.
+I think **Option B is probably the right choice** for the behavior you want.
 
-I think the main question is not whether it can work, but **where** the count should become authoritative:
+That is:
 
-- at **planning time**
-- at **download-start time**
-- or only in the **wording** of the status text
+- do discovery and merge planning as usual
+- do the filesystem-based correction step
+- treat the corrected list as the true list of files that still require download work now
+- persist that corrected list as the planned-download manifest surface for this run
 
-My view is that the simplest and cleanest option is:
+I agree with your instinct that the broader pre-correction list does **not** obviously belong in `state.json`.
 
-- make the denominator mean **files that actually still require download work right now**
-- compute that before writing the initial `downloading-in-progress` status
+## Why Option B fits your stated goal better
 
-That would make your `7` become `6` before the user sees the download-progress denominator.
+Your stated goal is not just:
 
-## The current mismatch
+- add a cosmetic filter before status writing
 
-Right now, the denominator comes from the merged `planned_downloads` list.
+It is more like:
 
-That list can contain:
+- discovery gives an initial candidate set
+- local filesystem reality corrects that candidate set
+- the corrected set becomes authoritative for what this run actually intends to download
 
-- retry candidates that really need work
-- rediscovered files that no longer need work because the destination file already exists
+If that is the intended meaning, then Option B is the cleaner model because:
 
-Later, the download loop notices the existing file and skips it.
+- spreadsheet counts match the same list the loop will use
+- durable planned-download state matches the same list the loop will use
+- there is less semantic drift between discovery, reporting, and execution
 
-So the current denominator is really:
+So from a conceptual cleanliness standpoint, I think your reasoning is strong.
 
-- **planned candidates**
+## What I think you are *not* overlooking
 
-not:
+I think this part of your reasoning is solid:
 
-- **actual downloads still needed**
+- the initial WASAPI discovery result is useful operational input
+- but that does not automatically mean it deserves durable manifest persistence in `state.json`
 
-That is why the visible count can feel off.
+That is especially true in this project because the plan already treats:
 
-## Simple possibilities
+- the filesystem and `state.json` as the source of truth for actual backup state
+- the spreadsheet as reporting/control
 
-### Option 1: filter the planned-download list before writing download-start status
+If a discovered candidate is immediately disproved by the current filesystem check, persisting it as a planned file can create noise rather than value.
 
-This is the most straightforward fix.
+## The main factors to watch
 
-Idea:
+I do think there are a few important factors to keep in mind.
 
-- after building and merging `planned_downloads`
-- do one pass over that list
-- remove any item whose destination WARC already exists on disk
-- use the filtered list for:
-  - `download planning complete`
-  - `downloading in progress`
-  - the actual download loop
+### 1. Decide whether "filesystem-corrected" really means only `warc_path.exists()`
 
-### Why this is attractive
+This is the biggest issue.
 
-- it keeps one consistent meaning of count
-- the denominator reflects real remaining work
-- the final success count is less surprising
-- it reduces no-op entries flowing into the download loop
+If Option B means:
 
-### Why this could be slightly tricky
+- remove an item from the authoritative list whenever the destination WARC already exists
 
-The main subtlety is semantic:
+then you are implicitly saying that, for this step, **existing WARC means no remaining work**.
 
-- if you remove existing files from `planned_downloads`, then `download planning complete` will no longer mean "all discovered + retry-derived candidates"
-- it will mean "all candidates that still need download work after a fresh on-disk existence check"
+That may be fine if it matches the current production loop behavior.
 
-I think that is probably the better meaning for the spreadsheet, but it is a behavior change.
-
-### My opinion
-
-This is probably the best option.
-
-## Option 2: keep `planned_downloads` as-is, but do an immediate pre-download pruning step
-
-This is very close to the option you proposed.
-
-Idea:
-
-- keep current planning logic unchanged
-- write `download planning complete` based on raw planned candidates if desired
-- before writing `downloading-in-progress`, do a quick filesystem recheck
-- build `active_downloads` from only the entries whose destination does not already exist
-- use `active_downloads` for the denominator and for the actual loop
-
-So the statuses might become:
-
-- `download planning complete -- 7 files planned`
-- `downloading-in-progress -- 0% (0/6 files)`
-
-### Why this is attractive
-
-- it is a smaller conceptual change than redefining all planning counts
-- it preserves a distinction between:
-  - planning candidates
-  - actual work queue
-- it directly addresses your concern
-
-### Why this could feel odd
-
-The user may still see:
-
-- `7 files planned`
-- then immediately `0/6 files`
-
-That is more defensible than the current behavior, but still slightly surprising unless the detail text explains why.
-
-For example, you might want wording like:
-
-- `0% (0/6 files needing download)`
-
-or:
-
-- `0% (0/6 files; 1 already present)`
-
-### My opinion
-
-This is a very reasonable low-risk option if you want to preserve the existing planning concept.
-
-## Option 3: keep the counts, but improve the wording
-
-Idea:
-
-- do not change planning or loop behavior
-- change the status wording so the denominator is explicitly understood as planned candidates
-
-Examples:
-
-- `downloading-in-progress -- 0% (0/7 planned items)`
-- final: `6 downloads completed successfully; 1 already present`
-
-### Why this is attractive
-
-- smallest code/behavior change
-- avoids rethinking the orchestration flow
-- preserves current internal semantics
-
-### Why I think it is weaker
-
-It is accurate, but probably less intuitive for an operator.
-
-Most people will read `(x/y files)` as:
-
-- files that still needed downloading
-
-not:
-
-- entries that were once considered for work
-
-So this fixes confusion mostly by explanation, not by making the number itself match expectation.
-
-### My opinion
-
-This is acceptable, but not my preferred fix.
-
-## Option 4: count downloaded-or-already-present as completed progress
-
-Idea:
-
-- keep the denominator at 7
-- when the loop sees an already-existing file, count it as completed progress
-- then the final message would also need to acknowledge that one item was already present
-
-For example:
-
-- start: `0% (0/7 files)`
-- after skip-existing + 6 downloads: effectively `7/7 complete`
-- final: `6 downloaded, 1 already present`
-
-### Why this is attractive
-
-- it preserves the full planned-candidate denominator
-- progress becomes internally consistent
-
-### Why it is probably not ideal here
-
-It blurs the meaning of `completed`:
-
-- some completions are actual downloads
-- some are no-op existing files
-
-That can be valid, but I think it is less aligned with the current wording `file downloads completed successfully`.
-
-### My opinion
-
-Reasonable, but not as clean as shrinking the active denominator.
-
-## What problems could an early filesystem recheck introduce?
-
-Your idea is good, but there are a few things to watch.
-
-### 1. Meaning drift between planning and download-start
-
-If one status says `7 planned` and the next says `6 files`, the operator may ask why the count changed.
-
-That is solvable, but the wording should be deliberate.
-
-### 2. Existence is a weaker check than full correctness
-
-The project plan says a file may still need work if:
+But the project plan’s broader ideal says a file may still need work when:
 
 - the WARC is missing
 - size verification fails
 - fixity sidecars are missing or invalid
 
-So if the early recheck only asks `does the WARC path exist?`, then it may undercount work in cases where:
+So the key question is:
 
-- the WARC exists but fixity is missing
-- the WARC exists but is bad/incomplete in a way the current existence check would miss
+- do you want Option B to reflect the **current implementation rule**
+- or the **full intended long-term rule**
 
-This is the biggest conceptual caveat.
+My recommendation:
 
-If you want the denominator to mean **remaining work**, the recheck should ideally use the same notion of "needs work" that the planner is supposed to use, not just plain file existence.
+- for this step, make Option B match the **current real skip rule** in production
+- if the current loop skips on WARC existence alone, then let the new authoritative list use that same rule
+- do not expand this step to full fixity validation unless the current code already does that
 
-### 3. Slight duplication of decision logic
+That keeps the change small and honest.
 
-If you add a quick pre-download filter in one place but keep the download loop doing its own existence skip, you now have two gates.
+### 2. Keep discovery information in logs if it is operationally useful
 
-That is not terrible, but it is better if both rely on one helper so the rule is defined once.
+I agree that the broader discovery list does not necessarily need to live in `state.json`.
 
-### 4. Small race-window concerns
+But it may still be worth logging summary information such as:
 
-In the current sequential flow, this is probably minor.
+- raw discovered/merged candidate count
+- corrected active-download count
+- how many were excluded because they were already present
 
-But conceptually, between:
+That gives you lightweight observability without polluting durable state.
 
-- the pre-download recheck
-- and the actual download attempt
+I think this matches your instinct well:
 
-the filesystem could change.
+- keep initial discovery info for partial persistence in logs
+- avoid storing it as if it were authoritative download intent
 
-So the loop should probably still keep its defensive skip check anyway.
+### 3. Be careful not to lose retry-relevant information accidentally
 
-That means the recheck improves the denominator, but does not eliminate the need for the loop-level guard.
+This is the main practical caution I would raise.
 
-## The simplest design I would recommend
+If a file appears in the broader merged list because of reconciliation or retry logic, and then gets dropped from the authoritative active list because the WARC exists, ask:
 
-I would recommend a small helper with a meaning like:
+- is there any current recovery behavior that relied on seeing that broader planned entry in `state.json`?
 
-- `planned item still requires download/fixity work now`
+My guess is that the answer may be **no**, or at least **not much**, because once the WARC exists the file probably should not remain a planned-download item.
 
-Then use that helper in one place just before writing `downloading-in-progress`.
+But this is still worth checking in code/tests before changing persistence semantics.
 
-Concretely:
+The main thing to confirm is that you are not accidentally removing some durable signal that current reconciliation logic expects on a later run.
 
-1. Build the broader merged planned list as you do now.
-2. Derive an `active_downloads` list from it using a helper.
-3. Write the download-start denominator from `len(active_downloads)`.
-4. Run the actual loop over `active_downloads`.
-5. Keep the loop's defensive existence check anyway.
+### 4. Keep the loop-level defensive check anyway
 
-That gives you the main improvement you want without a large redesign.
+Even with Option B, I would still keep the current loop-level `exists()` guard if it already exists.
 
-## If you want the absolute minimum change
+Reason:
 
-Then I would do this:
+- the pre-loop correction makes the count accurate
+- the loop-level check still protects against timing windows or unexpected local changes
 
-- keep planning as-is
-- add a quick pre-download filter for already-existing destinations
-- use the filtered list for the download-start denominator and loop
-- leave `download planning complete` alone for now
+So Option B should make the corrected list authoritative for planning/reporting/execution, but it should not eliminate cheap defensive checks.
 
-That would likely turn your specific case into:
+## My recommendation on the design choice
 
-- planning: `7 files planned`
-- download start: `0% (0/6 files)`
-- final: `6 file downloads completed successfully`
+I would recommend this concrete interpretation of Option B:
 
-That is already much easier to understand.
+1. build the merged candidate list as today
+2. derive one authoritative `active_downloads` list using the same rule the loop currently uses to decide "already present; skip"
+3. persist planned-download manifest entries only for `active_downloads`
+4. write spreadsheet planning/progress counts from `active_downloads`
+5. log the raw merged count and the excluded count for visibility
+6. keep the loop’s defensive existence check as a backstop
 
-## If you want the cleanest operator-facing behavior
+That gives you:
 
-Then I would go one step further:
+- cleaner durable state
+- cleaner spreadsheet semantics
+- less no-op work in the loop
+- enough observability to understand what happened
 
-- redefine the spreadsheet-facing count to mean **files that still require work**
-- use that same count consistently for planning, download start, and progress
+## What would make me hesitate about Option B
 
-That is slightly more invasive conceptually, but it gives the most natural user experience.
+I would only hesitate if code review shows one of these:
 
-## My recommendation
+- current tests rely on pre-download manifest persistence for files that later get skipped as already present
+- reconciliation logic depends on those broader planned entries remaining in `state.json`
+- current reporting intentionally distinguishes between "discovered" and "needs download" and you want to preserve both concepts durably
 
-My ranking would be:
-
-1. **Best balance:** pre-download filtering into an `active_downloads` list, then use that denominator for `downloading-in-progress` and the loop.
-2. **Cleanest semantics:** redefine planning counts too, so all spreadsheet-visible counts mean remaining work.
-3. **Lowest effort:** leave logic alone and improve wording.
+If none of those are true, then I think Option B is the better fit.
 
 ## Bottom line
 
-- Your early filesystem-check idea is sound.
-- The biggest thing to watch is that `exists()` is not always the same as `needs no more work`.
-- A simple pre-download filtering step is probably the best low-risk improvement.
-- If done carefully, it should make the denominator feel much more expected without introducing major new problems.
+- I think Option B is likely the right direction.
+- Your core idea is sound: after the filesystem correction step, the list should stop being a mere filter and become the authoritative download-intent list.
+- I agree that the broader pre-correction discovery list does not obviously need to be persisted in `state.json`.
+- The main thing to verify before implementation is whether current reconciliation/retry semantics depend on that broader planned persistence.
+- If they do not, I would choose Option B and keep the broader discovery information only in logs/summary metrics.
