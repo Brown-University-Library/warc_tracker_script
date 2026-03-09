@@ -11,9 +11,9 @@ Purpose: to show client reporting over time.
 
 Usage, via cron...
 ```
-uv run ./capture_google_sheet.py \
+uv run ./other/capture_google_sheet.py \
   --url 'https://docs.google.com/spreadsheets/d/YOUR_ID/edit#gid=123456789' \
-  --output-dir './sheet_screenshots' \
+  --output-dir '../../sheet_screenshots' \
   --one-shot
 ```
 
