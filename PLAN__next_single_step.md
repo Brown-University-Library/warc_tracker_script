@@ -222,9 +222,13 @@ Before editing behavior, lock down what each check means in current production t
 At minimum answer these questions from code review:
 
 - what source of expected size is available on a planned candidate, and is it always present?
+    - USER-ANSWER: don't change whatever is occurring currently; we can always tweak this later. In a future-notes section, you can suggest one suggested improvement.
 - what makes a fixity sidecar "valid enough" for this step: existence only, parseability, checksum-content consistency, or something narrower?
+    - USER-ANSWER: to be valid-enough, a check of the file-system should contain fixity existence, parseability, and checksum-content consistency.
 - when the manifest says a prior attempt failed, what exact conditions allow retry today?
+    - USER-ANSWER: don't change whatever is occurring currently; we can always tweak this later. In a future-notes section, you can suggest one suggested improvement.
 - if the WARC exists but fixity is missing, should the file remain in `active_downloads` under the current sequential loop design?
+    - USER-ANSWER: yes, absolutely.
 
 Recommendation for this step:
 
