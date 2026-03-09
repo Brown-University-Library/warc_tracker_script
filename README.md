@@ -53,7 +53,7 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 - That choice is intentional: `store-time` reflects when the WARC is actually available in WASAPI, and it can be later than the crawl-related timestamps. Since this script is about backup tracking rather than crawl tracking, `store-time` is the safest single clock to follow.
 
 - The per-collection local state stores one checkpoint value:
-  - `enumeration_checkpoint_store_time_max`
+  - `enumeration_checkpoint_store_time_max` -- This is a bookmark for how far the script got in listing candidate files from WASAPI. 
 
 - On each run, the script:
   - reads that saved checkpoint
@@ -78,6 +78,7 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 
 - In short, the 30-day window is a recovery buffer: it reduces the chance that a partial run or transient failure causes the script to permanently skip a WARC that should have been backed up.
 
+
 ---
 
 ### why is the local filesystem the source of truth?
@@ -89,6 +90,8 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 - By keeping the main truth locally, the script can recover more safely from interruptions, partial downloads, or spreadsheet write issues.
 
 - In practice, that means the most important record of progress is the collection's local folder plus its `state.json` file.
+
+- Just a note that this `state.json` file gets updated as each download attempt is made. So if a file fails to successfully download, even if the checkpoint/bookmark-date may move forward, subsequent runs will retry the failed downloads.
 
 ---
 
