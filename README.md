@@ -1,5 +1,34 @@
 # warc-tracker-script
 
+This script helps track and back up Archive-It WARC files for collections listed as active in a Google Sheets tracking spreadsheet.
+
+At a high level, it checks which collections are active, asks WASAPI what WARC files are available, downloads anything missing, writes local fixity information, and updates the spreadsheet with collection-level progress.
+
+The local filesystem is treated as the source of truth. The spreadsheet is mainly there to help monitor activity and control which collections are in scope.
+
+## What the script does
+
+- Reads the tracking spreadsheet and selects active collections.
+- Checks Archive-It WASAPI for WARC files associated with those collections.
+- Downloads WARC files that are not yet backed up locally.
+- Writes SHA-256 fixity sidecars for downloaded files.
+- Records per-collection state on disk so later runs can continue safely.
+- Updates the spreadsheet with simple collection-level progress and summary information.
+
+## How it works in practice
+
+- On a collection's first successful run, the script aims to do a full historical backfill.
+- On later runs, it re-checks a recent overlap window so that interrupted or partial runs are less likely to miss files.
+- Files are downloaded into a predictable collection-based folder structure.
+- Each collection keeps a local `state.json` file so the script can remember what it has already seen and what may need retrying.
+
+## Current state of the project
+
+- The current production flow processes collections sequentially.
+- It already performs collection discovery, download planning, downloading, fixity writing, and collection-level spreadsheet updates.
+- The design plan still leaves room for a later concurrent version with dedicated download workers and a separate spreadsheet updater.
+- Cron-oriented hardening is partly in place, but the full lock-wrapper path is still a later step.
+
 ## FAQs
 
 ### store-time and lookback
@@ -18,7 +47,7 @@
   - subtracts 30 days from it
   - queries WASAPI with `store-time-after=<checkpoint minus 30 days>`
 
-- On a first run, when no checkpoint exists yet, the script uses `now` as the reference point and still subtracts 30 days.
+- On a first run, when no checkpoint exists yet, the script does a full historical backfill for that collection instead of limiting itself to only the last 30 days.
 
 - Why keep the 30-day overlap window?
 
@@ -35,6 +64,31 @@
 - By querying again from 30 days before the saved checkpoint, the script deliberately re-sees a recent slice of already-known records. That overlap is then made safe by local filename-based state and deduplication logic.
 
 - In short, the 30-day window is a recovery buffer: it reduces the chance that a partial run or transient failure causes the script to permanently skip a WARC that should have been backed up.
+
+---
+
+### why is the local filesystem the source of truth?
+
+- The script is meant to make safe backup decisions based on what is actually present on disk.
+
+- The spreadsheet is useful for visibility, but it is not detailed enough to serve as the authoritative record of every file and retry state.
+
+- By keeping the main truth locally, the script can recover more safely from interruptions, partial downloads, or spreadsheet write issues.
+
+- In practice, that means the most important record of progress is the collection's local folder plus its `state.json` file.
+
+---
+
+### what gets stored for each collection?
+
+- Each collection gets its own local directory.
+
+- That directory includes:
+  - downloaded WARC files
+  - fixity sidecars
+  - a `state.json` file describing what the script has discovered and recorded for that collection
+
+- This layout is meant to keep each collection self-contained and easier to inspect.
 
 ---
 
@@ -59,6 +113,16 @@
 - The in-progress download updates are intentionally coarse rather than per-file chatter.
 
 - This keeps the sheet useful for monitoring without making spreadsheet state responsible for correctness.
+
+---
+
+### what is not in scope right now?
+
+- The current project is focused on backing up WARC files.
+
+- It intentionally does not yet cover more advanced features such as seed-level tracking, more complex storage layouts, resume-via-range requests, or a database-backed state system.
+
+- That keeps the current version simpler to operate while the core backup flow is being hardened.
 
 ---
 
