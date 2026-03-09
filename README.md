@@ -2,7 +2,7 @@
 
 This script helps track and back up Archive-It WARC files for collections listed as active in a Google Sheets tracking spreadsheet.
 
-At a high level, it checks which collections are active, asks WASAPI what WARC files are available, downloads anything missing, writes local fixity information, and updates the spreadsheet with collection-level progress.
+At a high level, it checks which collections are active, asks WASAPI (Archive-It'sWeb Archiving Systems API) what WARC files are available, downloads anything missing, writes local fixity information, and updates the spreadsheet with collection-level progress.
 
 The local filesystem is treated as the source of truth. The spreadsheet is mainly there to help monitor activity and control which collections are in scope.
 
@@ -11,12 +11,13 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 - Reads the tracking spreadsheet and selects active collections.
 - Checks Archive-It WASAPI for WARC files associated with those collections.
 - Downloads WARC files that are not yet backed up locally.
-- Writes SHA-256 fixity sidecars for downloaded files.
+- Writes SHA-256 fixity-checksum files for downloaded WARCs
 - Records per-collection state on disk so later runs can continue safely.
 - Updates the spreadsheet with simple collection-level progress and summary information.
 
 ## How it works in practice
 
+- The script will be run via a cron-job, but can also be run manually.
 - On a collection's first successful run, the script aims to do a full historical backfill.
 - On later runs, it re-checks a recent overlap window so that interrupted or partial runs are less likely to miss files.
 - Files are downloaded into a predictable collection-based folder structure.
@@ -85,7 +86,7 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 
 - That directory includes:
   - downloaded WARC files
-  - fixity sidecars
+  - fixity metadata files
   - a `state.json` file describing what the script has discovered and recorded for that collection
 
 - This layout is meant to keep each collection self-contained and easier to inspect.
@@ -116,17 +117,8 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 
 ---
 
-### what is not in scope right now?
 
-- The current project is focused on backing up WARC files.
-
-- It intentionally does not yet cover more advanced features such as seed-level tracking, more complex storage layouts, resume-via-range requests, or a database-backed state system.
-
-- That keeps the current version simpler to operate while the core backup flow is being hardened.
-
----
-
-## Current module responsibilities
+## Current code module responsibilities
 
 - `main.py` remains a thin entry point that loads config, configures logging, opens an authenticated `httpx.Client`, and iterates collection jobs.
 - `lib/orchestration.py` processes collections sequentially.
