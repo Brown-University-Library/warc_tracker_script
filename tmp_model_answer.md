@@ -1,135 +1,302 @@
-# Investigation summary
+# Ideas for making the denominator more accurate / expected
 
 I reviewed:
 - `warc_tracker_script/AGENTS.md`
 - `warc_tracker_script/PLAN__simplified_warc_backup_script.md`
-- `logs/warc_tracker_script.log`
-- the relevant orchestration/status code in `warc_tracker_script/lib/orchestration.py`
+- `warc_tracker_script/tmp_recent_prompt.md`
+- `warc_tracker_script/tmp_model_answer.md`
 
 ## Short answer
 
-I do **not** think this is a literal arithmetic off-by-1 bug.
+Yes, your idea of an early filesystem check is a reasonable and fairly simple option.
 
-I think it is a **count-definition mismatch**:
-- the second-run in-progress denominator (`7`) is the number of **planned downloads**
-- the second-run final success count (`6`) is the number of **actual successful download operations**
-- one of the 7 planned items was already present on disk by the time the second run reached the download loop, so it was **planned** but then **skipped**, which is why the final text said `6`
+I think the main question is not whether it can work, but **where** the count should become authoritative:
 
-## What the log shows
+- at **planning time**
+- at **download-start time**
+- or only in the **wording** of the status text
 
-### First run
+My view is that the simplest and cleanest option is:
 
-The first run clearly planned 24 downloads:
-- `Collection 22900 has 24 reconciliation candidates, 1 discovery candidates, and 24 merged planned downloads.`
-- `Collection 22900 spreadsheet status updated: download planning complete with 24 files planned.`
-- `Collection 22900 spreadsheet status updated: downloading in progress for 24 planned files.`
+- make the denominator mean **files that actually still require download work right now**
+- compute that before writing the initial `downloading-in-progress` status
 
-That matches your understanding that the collection really had 24 files.
+That would make your `7` become `6` before the user sees the download-progress denominator.
 
-The first run ended with 6 failures:
-- `Collection 22900 has 1 pending candidates, 24 planned downloads, 18 download successes, 6 download failures, 0 skipped existing files, 18 fixity successes, and 0 fixity failures.`
+## The current mismatch
 
-So after run 1, there were 18 successfully downloaded files on disk and 6 retryable missing files.
+Right now, the denominator comes from the merged `planned_downloads` list.
 
-### Second run
+That list can contain:
 
-The second run shows exactly why `7` appeared:
-- `Collection 22900 has 6 reconciliation candidates, 1 discovery candidates, and 7 merged planned downloads.`
+- retry candidates that really need work
+- rediscovered files that no longer need work because the destination file already exists
 
-So the spreadsheet showed `7` because the code uses the merged planned-download list length for in-progress reporting.
+Later, the download loop notices the existing file and skips it.
 
-Later in the same run, the log shows this:
-- `Collection 22900 skipping download for ARCHIVEIT-22900-QUARTERLY-JOB2649176-0-SEED3256845-20260105141018582-00000-aokwrf4m.warc.gz because the destination already exists`
+So the current denominator is really:
 
-And then the final summary says:
-- `Collection 22900 has 0 pending candidates, 7 planned downloads, 6 download successes, 0 download failures, 1 skipped existing files, 6 fixity successes, and 0 fixity failures.`
+- **planned candidates**
 
-That is the direct explanation for the visible mismatch:
-- `7 planned`
-- `6 successful downloads`
-- `1 skipped existing file`
+not:
 
-## Why that happened in code
+- **actual downloads still needed**
 
-The relevant code paths are in `warc_tracker_script/lib/orchestration.py`.
+That is why the visible count can feel off.
 
-### In-progress denominator uses planned-download count
+## Simple possibilities
 
-`process_collection_job()` writes the download-start spreadsheet status using:
-- `write_collection_download_start_status(..., len(planned_downloads))`
+### Option 1: filter the planned-download list before writing download-start status
 
-And `build_download_start_status()` formats that as:
-- `0% (0/{total_planned_downloads} files)`
+This is the most straightforward fix.
 
-So the second run's initial denominator of `7` came from `len(planned_downloads)`.
+Idea:
 
-### Discovery planning currently includes a rediscovered file even if it already exists locally
+- after building and merging `planned_downloads`
+- do one pass over that list
+- remove any item whose destination WARC already exists on disk
+- use the filtered list for:
+  - `download planning complete`
+  - `downloading in progress`
+  - the actual download loop
 
-`build_planned_downloads()` creates planned download items from discovered WASAPI records if they have:
-- a usable filename
-- a usable source URL
+### Why this is attractive
 
-It does **not** check whether the destination WARC already exists locally.
+- it keeps one consistent meaning of count
+- the denominator reflects real remaining work
+- the final success count is less surprising
+- it reduces no-op entries flowing into the download loop
 
-That means the rediscovered quarterly file was included in `planned_downloads`, contributing to the `7`.
+### Why this could be slightly tricky
 
-### Actual download results exclude skipped-existing items
+The main subtlety is semantic:
 
-In `run_planned_downloads()`:
-- if `destination_path.exists()`, the code logs a skip and `continue`s immediately
-- it does **not** append a `DownloadResult` for that skipped item
+- if you remove existing files from `planned_downloads`, then `download planning complete` will no longer mean "all discovered + retry-derived candidates"
+- it will mean "all candidates that still need download work after a fresh on-disk existence check"
 
-So skipped-existing items:
-- still count in `planned_downloads`
-- do **not** count in `download_results`
+I think that is probably the better meaning for the spreadsheet, but it is a behavior change.
 
-### Final success text uses only actual successful downloads
+### My opinion
 
-`build_collection_final_report()` computes:
-- `successful_download_count = sum(1 for result in download_results if result.success)`
-- status detail: `'{successful_download_count} file downloads completed successfully'`
+This is probably the best option.
 
-So the final `6` is the number of actual successful download operations during that run, not the number of planned items.
+## Option 2: keep `planned_downloads` as-is, but do an immediate pre-download pruning step
 
-## Conclusion
+This is very close to the option you proposed.
 
-Your observed `7` then `6` sequence is explained by current code and log evidence.
+Idea:
 
-It is **not** that the collection suddenly had 7 missing files.
+- keep current planning logic unchanged
+- write `download planning complete` based on raw planned candidates if desired
+- before writing `downloading-in-progress`, do a quick filesystem recheck
+- build `active_downloads` from only the entries whose destination does not already exist
+- use `active_downloads` for the denominator and for the actual loop
 
-Instead:
-- there were really **6 retry candidates** left from the first run
-- plus **1 rediscovered WASAPI record**
-- that rediscovered file was already present locally
-- so it was counted during planning, but skipped during execution
-- therefore the final success message reported only `6`
+So the statuses might become:
 
-## Is this a bug?
+- `download planning complete -- 7 files planned`
+- `downloading-in-progress -- 0% (0/6 files)`
 
-I would call it a **real reporting bug / UX inconsistency**, though not a literal off-by-1 arithmetic error.
+### Why this is attractive
 
-The user-visible issue is that the spreadsheet mixes two different notions of count:
-- **planned items** during in-progress reporting
-- **actual successful download operations** in the final success text
+- it is a smaller conceptual change than redefining all planning counts
+- it preserves a distinction between:
+  - planning candidates
+  - actual work queue
+- it directly addresses your concern
 
-That mismatch is what made the second run look suspicious.
+### Why this could feel odd
 
-## Smallest likely fix direction
+The user may still see:
 
-The cleanest fix is probably to make the in-progress denominator reflect **actual work that still needs download**, not raw merged planned entries.
+- `7 files planned`
+- then immediately `0/6 files`
 
-In practice, that likely means filtering discovery-based planned downloads so they do not enter the active planned list when the destination WARC already exists locally.
+That is more defensible than the current behavior, but still slightly surprising unless the detail text explains why.
 
-An alternative would be to keep the current planning behavior but change the final wording so it explicitly distinguishes:
-- planned items
-- skipped-existing items
-- successful new downloads
+For example, you might want wording like:
 
-But based on the current spreadsheet wording, I think the stronger fix is to make the progress denominator align with actual download work.
+- `0% (0/6 files needing download)`
+
+or:
+
+- `0% (0/6 files; 1 already present)`
+
+### My opinion
+
+This is a very reasonable low-risk option if you want to preserve the existing planning concept.
+
+## Option 3: keep the counts, but improve the wording
+
+Idea:
+
+- do not change planning or loop behavior
+- change the status wording so the denominator is explicitly understood as planned candidates
+
+Examples:
+
+- `downloading-in-progress -- 0% (0/7 planned items)`
+- final: `6 downloads completed successfully; 1 already present`
+
+### Why this is attractive
+
+- smallest code/behavior change
+- avoids rethinking the orchestration flow
+- preserves current internal semantics
+
+### Why I think it is weaker
+
+It is accurate, but probably less intuitive for an operator.
+
+Most people will read `(x/y files)` as:
+
+- files that still needed downloading
+
+not:
+
+- entries that were once considered for work
+
+So this fixes confusion mostly by explanation, not by making the number itself match expectation.
+
+### My opinion
+
+This is acceptable, but not my preferred fix.
+
+## Option 4: count downloaded-or-already-present as completed progress
+
+Idea:
+
+- keep the denominator at 7
+- when the loop sees an already-existing file, count it as completed progress
+- then the final message would also need to acknowledge that one item was already present
+
+For example:
+
+- start: `0% (0/7 files)`
+- after skip-existing + 6 downloads: effectively `7/7 complete`
+- final: `6 downloaded, 1 already present`
+
+### Why this is attractive
+
+- it preserves the full planned-candidate denominator
+- progress becomes internally consistent
+
+### Why it is probably not ideal here
+
+It blurs the meaning of `completed`:
+
+- some completions are actual downloads
+- some are no-op existing files
+
+That can be valid, but I think it is less aligned with the current wording `file downloads completed successfully`.
+
+### My opinion
+
+Reasonable, but not as clean as shrinking the active denominator.
+
+## What problems could an early filesystem recheck introduce?
+
+Your idea is good, but there are a few things to watch.
+
+### 1. Meaning drift between planning and download-start
+
+If one status says `7 planned` and the next says `6 files`, the operator may ask why the count changed.
+
+That is solvable, but the wording should be deliberate.
+
+### 2. Existence is a weaker check than full correctness
+
+The project plan says a file may still need work if:
+
+- the WARC is missing
+- size verification fails
+- fixity sidecars are missing or invalid
+
+So if the early recheck only asks `does the WARC path exist?`, then it may undercount work in cases where:
+
+- the WARC exists but fixity is missing
+- the WARC exists but is bad/incomplete in a way the current existence check would miss
+
+This is the biggest conceptual caveat.
+
+If you want the denominator to mean **remaining work**, the recheck should ideally use the same notion of "needs work" that the planner is supposed to use, not just plain file existence.
+
+### 3. Slight duplication of decision logic
+
+If you add a quick pre-download filter in one place but keep the download loop doing its own existence skip, you now have two gates.
+
+That is not terrible, but it is better if both rely on one helper so the rule is defined once.
+
+### 4. Small race-window concerns
+
+In the current sequential flow, this is probably minor.
+
+But conceptually, between:
+
+- the pre-download recheck
+- and the actual download attempt
+
+the filesystem could change.
+
+So the loop should probably still keep its defensive skip check anyway.
+
+That means the recheck improves the denominator, but does not eliminate the need for the loop-level guard.
+
+## The simplest design I would recommend
+
+I would recommend a small helper with a meaning like:
+
+- `planned item still requires download/fixity work now`
+
+Then use that helper in one place just before writing `downloading-in-progress`.
+
+Concretely:
+
+1. Build the broader merged planned list as you do now.
+2. Derive an `active_downloads` list from it using a helper.
+3. Write the download-start denominator from `len(active_downloads)`.
+4. Run the actual loop over `active_downloads`.
+5. Keep the loop's defensive existence check anyway.
+
+That gives you the main improvement you want without a large redesign.
+
+## If you want the absolute minimum change
+
+Then I would do this:
+
+- keep planning as-is
+- add a quick pre-download filter for already-existing destinations
+- use the filtered list for the download-start denominator and loop
+- leave `download planning complete` alone for now
+
+That would likely turn your specific case into:
+
+- planning: `7 files planned`
+- download start: `0% (0/6 files)`
+- final: `6 file downloads completed successfully`
+
+That is already much easier to understand.
+
+## If you want the cleanest operator-facing behavior
+
+Then I would go one step further:
+
+- redefine the spreadsheet-facing count to mean **files that still require work**
+- use that same count consistently for planning, download start, and progress
+
+That is slightly more invasive conceptually, but it gives the most natural user experience.
+
+## My recommendation
+
+My ranking would be:
+
+1. **Best balance:** pre-download filtering into an `active_downloads` list, then use that denominator for `downloading-in-progress` and the loop.
+2. **Cleanest semantics:** redefine planning counts too, so all spreadsheet-visible counts mean remaining work.
+3. **Lowest effort:** leave logic alone and improve wording.
 
 ## Bottom line
 
-- The collection total of `24` appears correct.
-- The second-run `7` came from `6 reconciliation retries + 1 rediscovered WASAPI item`.
-- The second-run final `6` came from `6 actual successful downloads`, with `1 skipped existing file`.
-- So this looks like a **planned-vs-executed counting mismatch**, not a true arithmetic off-by-1.
+- Your early filesystem-check idea is sound.
+- The biggest thing to watch is that `exists()` is not always the same as `needs no more work`.
+- A simple pre-download filtering step is probably the best low-risk improvement.
+- If done carefully, it should make the denominator feel much more expected without introducing major new problems.
