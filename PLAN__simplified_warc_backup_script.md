@@ -603,12 +603,12 @@ Keep this minimal and practical.
    - [x] add richer sequential phase/status reporting and mid-download progress reporting
    - [x] make final downloaded-WARC count/size summary fields report collection totals from on-disk WARCs
    - next slice: move sheet writes behind the dedicated sheet-updater task
-13. Implement the `Trio` flow:
+13. Add lock and cron wrapper.
+14. Implement the `Trio` flow:
    - main orchestrator
    - download worker 1
    - download worker 2
    - sheet updater
-14. Add lock and cron wrapper.
 15. Run on a small set of collections before scaling up.
 
 ---

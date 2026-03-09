@@ -1,5 +1,3 @@
-- review `warc_tracker_script/AGENTS.md` for coding-directives to follow.
-- review `warc_tracker_script/PLAN__simplified_warc_backup_script.md` for an overview of the whole project.
-- review `warc_tracker_script/PLAN__next_single_step.md` for next-step instructions, and implement them, being sure that previous and new tests pass.
-- update `warc_tracker_script/PLAN__simplified_warc_backup_script.md` with what has been completed.
+- i'd like to reverse the order of the next Trio-step and the lock-and-cron-wrapper step. Any significant downsides to this?
+- if not, update this plan-file to reflect the re-order.
 - save the text of this prompt to `warc_tracker_script/tmp_recent_prompt.md`, overwriting the previous file.
