@@ -40,6 +40,8 @@ Completed so far:
 - additional focused `unittest` coverage exists for reconciliation-driven retry planning, malformed manifest-entry skipping, filename-level merge/dedup behavior, and reconciliation-only download candidates flowing through the current sequential production orchestration
 - the sequential production spreadsheet reporting flow now writes bounded intermediate collection statuses for `discovery-in-progress`, `download-planning-complete`, `downloading-in-progress`, and `no-new-files-to-download`, plus coarse `20%`/`40%`/`60%`/`80%` mid-download progress milestones while keeping final collection reporting authoritative
 - focused `unittest` coverage now exists for the sequential spreadsheet phase transition ordering and coarse download-progress milestone behavior
+- the final collection-level spreadsheet summary flow now computes `summary_status_downloaded_warcs_count` and `summary_status_downloaded_warcs_size` from the collection's on-disk downloaded WARCs, so summary values reflect collection totals after processing completes rather than only current-run successes
+- focused `unittest` coverage now exists for cumulative on-disk final summary totals, including no-op collections that still report existing downloaded totals
 
 Not yet implemented in the production backup flow:
 
@@ -599,6 +601,7 @@ Keep this minimal and practical.
    - [x] validate required reporting columns up front
    - [x] write collection-level start/final status updates from the existing sequential flow
    - [x] add richer sequential phase/status reporting and mid-download progress reporting
+   - [x] make final downloaded-WARC count/size summary fields report collection totals from on-disk WARCs
    - next slice: move sheet writes behind the dedicated sheet-updater task
 13. Implement the `Trio` flow:
    - main orchestrator

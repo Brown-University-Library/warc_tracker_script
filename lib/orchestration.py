@@ -579,22 +579,49 @@ def log_collection_download_summary(
     )
 
 
+def iter_collection_warc_paths(storage_root: Path, collection_id: int) -> list[Path]:
+    """
+    Returns downloaded WARC paths currently present on disk for one collection.
+    """
+    collection_root = storage_root / 'collections' / str(collection_id)
+    warc_root = collection_root / 'warcs'
+    result: list[Path] = []
+    if warc_root.exists():
+        result = [path for path in warc_root.rglob('*.warc.gz') if path.is_file()]
+    return result
+
+
+def get_collection_downloaded_totals(storage_root: Path, collection_id: int) -> tuple[int, int]:
+    """
+    Returns the total downloaded WARC count and byte size currently present for one collection.
+    """
+    warc_paths = iter_collection_warc_paths(storage_root, collection_id)
+    total_count = len(warc_paths)
+    total_size = sum(path.stat().st_size for path in warc_paths)
+    log.info(
+        'Collection %s final summary totals computed from on-disk WARCs: %s files, %s bytes.',
+        collection_id,
+        total_count,
+        total_size,
+    )
+    result = (total_count, total_size)
+    return result
+
+
 def build_collection_summary_update(
     storage_root: Path,
     collection_id: int,
     discovery_completed_at: str,
-    download_results: list[DownloadResult],
 ) -> CollectionSummaryUpdate:
     """
     Builds final spreadsheet summary-field values for one collection.
     """
     collection_root = storage_root / 'collections' / str(collection_id)
-    successful_download_count = sum(1 for result in download_results if result.success)
-    successful_download_size = sum(result.bytes_written for result in download_results if result.success)
+    total_downloaded_count, total_downloaded_size = get_collection_downloaded_totals(storage_root, collection_id)
     result = CollectionSummaryUpdate(
         summary_status_last_wasapi_check=discovery_completed_at,
-        summary_status_downloaded_warcs_count=str(successful_download_count),
-        summary_status_downloaded_warcs_size=format_downloaded_size_gb(successful_download_size),
+        summary_status_downloaded_warcs_count=str(total_downloaded_count),
+        summary_status_downloaded_warcs_size=format_downloaded_size_gb(total_downloaded_size),
         summary_status_server_path=str(collection_root),
     )
     return result
@@ -631,7 +658,6 @@ def build_collection_final_report(
             storage_root=storage_root,
             collection_id=collection_job.collection_id,
             discovery_completed_at=discovery_completed_at,
-            download_results=download_results,
         ),
     )
     return result

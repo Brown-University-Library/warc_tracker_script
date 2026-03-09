@@ -412,7 +412,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_update_status.call_args.args[2], 7)
         self.assertEqual(mock_final_reporting.call_args.args[2], 7)
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
-        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '1')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
     def test_zero_planned_downloads_write_planning_then_no_new_files_statuses(self):
@@ -475,6 +475,8 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(status_updates[2].processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
         self.assertEqual(status_updates[2].processing_status_detail, 'since 2026-03-07T15:00:00+00:00')
         self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
     def test_planned_downloads_persisted_before_download_attempts(self):
         """
@@ -1035,6 +1037,55 @@ class TestCollectionReportingHelpers(TestCase):
     """
     Test cases for final spreadsheet reporting helper payloads.
     """
+
+    def test_build_collection_final_report_uses_on_disk_collection_totals(self):
+        """
+        Checks that final summary fields report cumulative on-disk totals, not only current-run successes.
+        """
+        collection_job = CollectionJob(123, 'UA', 'https://example.com', 'Example', 7)
+        successful_download = MagicMock()
+        successful_download.success = True
+        successful_download.bytes_written = 11
+
+        with patch(
+            'lib.orchestration.get_collection_downloaded_totals',
+            return_value=(3, 3 * (1024**3)),
+        ):
+            result = build_collection_final_report(
+                storage_root=Path('/tmp/storage'),
+                collection_job=collection_job,
+                discovery_completed_at='2026-03-07T15:00:00+00:00',
+                planned_downloads=[MagicMock()],
+                download_results=[successful_download],
+                fixity_results=[],
+            )
+
+        self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '3')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '3.0 GB')
+
+    def test_build_collection_final_report_no_new_downloads_still_reports_on_disk_totals(self):
+        """
+        Checks that no-op collections still report existing downloaded totals from disk.
+        """
+        collection_job = CollectionJob(123, 'UA', 'https://example.com', 'Example', 7)
+
+        with patch(
+            'lib.orchestration.get_collection_downloaded_totals',
+            return_value=(2, 2 * (1024**3)),
+        ):
+            result = build_collection_final_report(
+                storage_root=Path('/tmp/storage'),
+                collection_job=collection_job,
+                discovery_completed_at='2026-03-07T15:00:00+00:00',
+                planned_downloads=[],
+                download_results=[],
+                fixity_results=[],
+            )
+
+        self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '2')
+        self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '2.0 GB')
 
     def test_build_collection_final_report_for_file_failures(self):
         """
