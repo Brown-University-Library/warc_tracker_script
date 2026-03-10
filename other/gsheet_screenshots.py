@@ -17,7 +17,7 @@ uv run ./other/capture_google_sheet.py \
   --one-shot
 ```
 
-Written by `ChatGPT-5.4-Thinking`
+Written by `ChatGPT-5.4-Low-Thinking`
 """
 
 import argparse
