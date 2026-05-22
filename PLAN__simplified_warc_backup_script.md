@@ -42,8 +42,8 @@ Completed so far:
 - focused `unittest` coverage now exists for the sequential spreadsheet phase transition ordering and coarse download-progress milestone behavior
 - the final collection-level spreadsheet summary flow now computes `summary_status_downloaded_warcs_count` and `summary_status_downloaded_warcs_size` from the collection's on-disk downloaded WARCs, so summary values reflect collection totals after processing completes rather than only current-run successes
 - focused `unittest` coverage now exists for cumulative on-disk final summary totals, including no-op collections that still report existing downloaded totals
-- a startup spreadsheet-status coordination preflight now exists for non-`cron_locked` runs; it inspects the active collection-job worksheet rows before processing begins, blocks startup when explicit in-progress `processing_status_main` values are present, and skips this soft guard only when `RUN_COORDINATION_MODE=cron_locked`
-- focused `unittest` coverage now exists for coordination-mode parsing, non-`cron_locked` startup blocking/allow behavior, and the guarantee that coordination refusal happens before HTTP client creation or per-collection processing begins
+- a startup spreadsheet-status coordination preflight now exists unless explicitly skipped; it inspects the active collection-job worksheet rows before processing begins, blocks startup when explicit in-progress `processing_status_main` values are present, and skips this soft guard only when `RUN_COORDINATION_MODE=skip_spreadsheet_coordination_check`
+- focused `unittest` coverage now exists for coordination-mode parsing, default startup blocking/allow behavior, and the guarantee that coordination refusal happens before HTTP client creation or per-collection processing begins
 
 Not yet implemented in the production backup flow:
 
@@ -606,7 +606,7 @@ Keep this minimal and practical.
     - [x] make final downloaded-WARC count/size summary fields report collection totals from on-disk WARCs
     - next slice: move sheet writes behind the dedicated sheet-updater task
 13. Add lock and cron wrapper.
-    - [x] add startup spreadsheet-status coordination preflight for non-`cron_locked` runs
+    - [x] add startup spreadsheet-status coordination preflight unless explicitly skipped
     - next slice: implement the actual cron wrapper / `flock` hard-lock path for scheduled runs
 14. Implement the `Trio` flow:
     - main orchestrator

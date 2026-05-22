@@ -20,7 +20,7 @@ from lib.orchestration import (
     BLOCKING_COORDINATION_STATUSES,
     DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN,
     DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW,
-    RUN_COORDINATION_MODE_CRON_LOCKED,
+    RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK,
     STATUS_COMPLETED_WITH_SOME_FILE_FAILURES,
     STATUS_DISCOVERY_IN_PROGRESS,
     STATUS_DOWNLOADED_WITHOUT_ERRORS,
@@ -107,16 +107,22 @@ class TestRunCoordinationHelpers(TestCase):
         """
         Checks that coordination mode returns the configured non-blank string.
         """
-        with patch.dict(os.environ, {'RUN_COORDINATION_MODE': RUN_COORDINATION_MODE_CRON_LOCKED}, clear=True):
+        with patch.dict(
+            os.environ,
+            {'RUN_COORDINATION_MODE': RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK},
+            clear=True,
+        ):
             result = get_run_coordination_mode()
 
-        self.assertEqual(result, RUN_COORDINATION_MODE_CRON_LOCKED)
+        self.assertEqual(result, RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK)
 
-    def test_should_skip_spreadsheet_coordination_check_only_for_exact_cron_locked(self):
+    def test_should_skip_spreadsheet_coordination_check_only_for_exact_skip_mode(self):
         """
-        Checks that only the exact cron_locked mode skips spreadsheet coordination preflight.
+        Checks that only the exact skip mode skips spreadsheet coordination preflight.
         """
-        self.assertTrue(should_skip_spreadsheet_coordination_check(RUN_COORDINATION_MODE_CRON_LOCKED))
+        self.assertTrue(
+            should_skip_spreadsheet_coordination_check(RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK)
+        )
         self.assertFalse(should_skip_spreadsheet_coordination_check('manual'))
         self.assertFalse(should_skip_spreadsheet_coordination_check(None))
 
@@ -145,9 +151,9 @@ class TestRunCoordinationHelpers(TestCase):
 
         self.assertIsNone(result)
 
-    def test_enforce_startup_run_coordination_blocks_non_cron_locked_active_status(self):
+    def test_enforce_startup_run_coordination_blocks_active_status_without_skip_mode(self):
         """
-        Checks that a non-cron_locked run is refused when an active in-progress spreadsheet status is present.
+        Checks that a run is refused when an active in-progress spreadsheet status is present without skip mode.
         """
         header_location = HeaderLocation(
             header_row_index=1,
@@ -169,13 +175,13 @@ class TestRunCoordinationHelpers(TestCase):
         with self.assertRaises(RunCoordinationError) as exc_context:
             enforce_startup_run_coordination('manual', values, header_location, collection_jobs)
 
-        self.assertIn('Non-cron_locked runs must not start', str(exc_context.exception))
+        self.assertIn('Runs must not start when spreadsheet in-progress statuses are present', str(exc_context.exception))
         self.assertIn(STATUS_DISCOVERY_IN_PROGRESS, str(exc_context.exception))
         self.assertIn('123', str(exc_context.exception))
 
-    def test_enforce_startup_run_coordination_skips_blocking_check_for_cron_locked(self):
+    def test_enforce_startup_run_coordination_skips_blocking_check_for_skip_mode(self):
         """
-        Checks that cron_locked mode bypasses spreadsheet blocking statuses.
+        Checks that skip mode bypasses spreadsheet blocking statuses.
         """
         header_location = HeaderLocation(
             header_row_index=1,
@@ -191,7 +197,7 @@ class TestRunCoordinationHelpers(TestCase):
         collection_jobs = [CollectionJob(123, 'UA', 'https://example.com/123', 'Alpha', 2)]
 
         result = enforce_startup_run_coordination(
-            RUN_COORDINATION_MODE_CRON_LOCKED, values, header_location, collection_jobs
+            RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK, values, header_location, collection_jobs
         )
 
         self.assertIsNone(result)

@@ -44,7 +44,7 @@ STATUS_SPREADSHEET_UPDATE_FAILED = 'spreadsheet-update-failed'
 DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN = 'full-backfill-first-run'
 DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW = 'incremental-overlap-window'
 
-RUN_COORDINATION_MODE_CRON_LOCKED = 'cron_locked'
+RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK = 'skip_spreadsheet_coordination_check'
 BLOCKING_COORDINATION_STATUSES = frozenset(
     (
         STATUS_DISCOVERY_IN_PROGRESS,
@@ -57,7 +57,7 @@ DOWNLOAD_PROGRESS_MILESTONES = (20, 40, 60, 80)
 
 class RunCoordinationError(RuntimeError):
     """
-    Indicates that startup coordination policy refused to begin a non-cron_locked run.
+    Indicates that startup coordination policy refused to begin a run with blocking in-progress spreadsheet statuses.
     """
 
 
@@ -146,7 +146,7 @@ def should_skip_spreadsheet_coordination_check(coordination_mode: str | None) ->
     Returns whether startup spreadsheet coordination preflight should be skipped.
     Called by: enforce_startup_run_coordination()
     """
-    result = coordination_mode == RUN_COORDINATION_MODE_CRON_LOCKED
+    result = coordination_mode == RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK
     return result
 
 
@@ -199,12 +199,15 @@ def enforce_startup_run_coordination(
     collection_jobs: list[CollectionJob],
 ) -> None:
     """
-    Enforces the startup spreadsheet coordination policy for non-cron_locked runs.
+    Enforces the startup spreadsheet coordination policy unless explicitly skipped.
     Called by: run_collection_orchestration()
     """
     log.info('Resolved startup coordination mode: %s', coordination_mode or '<unset>')
     if should_skip_spreadsheet_coordination_check(coordination_mode):
-        log.info('Skipping spreadsheet coordination preflight because RUN_COORDINATION_MODE=cron_locked.')
+        log.info(
+            'Skipping spreadsheet coordination preflight because '
+            'RUN_COORDINATION_MODE=skip_spreadsheet_coordination_check.'
+        )
         return
     blocking_summary = get_blocking_coordination_summary(values, header_location, collection_jobs)
     if blocking_summary is None:
@@ -220,7 +223,8 @@ def enforce_startup_run_coordination(
     )
     blocking_status_display = ', '.join(blocking_summary.blocking_statuses)
     raise RunCoordinationError(
-        'Non-cron_locked runs must not start when spreadsheet in-progress statuses are present. '
+        'Runs must not start when spreadsheet in-progress statuses are present unless '
+        'RUN_COORDINATION_MODE=skip_spreadsheet_coordination_check. '
         f'Blocking statuses: {blocking_status_display}. '
         f'Blocking collection ids: {blocking_collection_id_display}.'
     )
