@@ -13,6 +13,7 @@ from validate_spreadsheet_connection import (
     resolve_spreadsheet_id,
     run_validation,
 )
+from lib.collection_sheet import CollectionSheetContractError
 
 
 class TestResolveSpreadsheetId(TestCase):
@@ -95,6 +96,24 @@ class TestRunValidation(TestCase):
 
         self.assertEqual(result, 1)
         self.assertIn('Spreadsheet connection validation failed', mock_print.call_args.args[0])
+
+    def test_run_validation_reports_contract_error_as_sheet_readiness_failure(self):
+        """
+        Checks that worksheet contract failures are not reported as connection failures.
+        """
+        with (
+            patch(
+                'validate_spreadsheet_connection.validate_collection_sheet_connection',
+                side_effect=CollectionSheetContractError('Missing required collection reporting columns: alpha'),
+            ),
+            patch('builtins.print') as mock_print,
+        ):
+            result = run_validation('spreadsheet-id')
+
+        self.assertEqual(result, 1)
+        self.assertIn('connection succeeded', mock_print.call_args.args[0])
+        self.assertIn('not ready in the expected format', mock_print.call_args.args[0])
+        self.assertIn('Missing required collection reporting columns: alpha', mock_print.call_args.args[0])
 
 
 if __name__ == '__main__':
