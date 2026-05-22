@@ -40,6 +40,7 @@ from lib.orchestration import (
     count_pending_download_candidates,
     determine_collection_discovery_mode,
     enforce_startup_run_coordination,
+    format_local_display_timestamp,
     get_archive_it_credentials,
     get_blocking_coordination_summary,
     get_download_progress_milestone_update,
@@ -205,6 +206,21 @@ class TestRunCoordinationHelpers(TestCase):
         self.assertEqual(
             BLOCKING_COORDINATION_STATUSES, frozenset((STATUS_DISCOVERY_IN_PROGRESS, STATUS_DOWNLOADING_IN_PROGRESS))
         )
+
+
+class TestDisplayTimestampFormatting(TestCase):
+    """
+    Test cases for spreadsheet display timestamp formatting.
+    """
+
+    def test_format_local_display_timestamp_uses_seconds_precision(self):
+        """
+        Checks that spreadsheet display timestamps drop sub-second precision.
+        """
+        result = format_local_display_timestamp('2026-03-07T15:00:00.987654+00:00')
+
+        self.assertNotIn('.987654', result)
+        self.assertIn('T', result)
 
 
 class TestCountPendingDownloadCandidates(TestCase):
@@ -733,7 +749,11 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
         self.assertEqual(
             result.status_update.processing_status_detail,
-            'since 2026-03-07T15:00:00+00:00',
+            f"since {format_local_display_timestamp('2026-03-07T15:00:00+00:00')}",
+        )
+        self.assertEqual(
+            result.summary_update.summary_status_last_wasapi_check,
+            format_local_display_timestamp('2026-03-07T15:00:00+00:00'),
         )
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
@@ -1000,7 +1020,7 @@ class TestProcessCollectionJob(TestCase):
         status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(
             status_updates[0].processing_status_detail,
-            'store-time-after 2026-01-30T12:00:00+00:00',
+            f"store-time-after {format_local_display_timestamp('2026-01-30T12:00:00+00:00')}",
         )
         self.assertEqual(mock_save.call_args.args[2]['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
 
@@ -1321,6 +1341,10 @@ class TestCollectionReportingHelpers(TestCase):
             )
 
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
+        self.assertEqual(
+            result.summary_update.summary_status_last_wasapi_check,
+            format_local_display_timestamp('2026-03-07T15:00:00+00:00'),
+        )
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '3')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '3.0 GB')
 
@@ -1346,7 +1370,11 @@ class TestCollectionReportingHelpers(TestCase):
         self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
         self.assertEqual(
             result.status_update.processing_status_detail,
-            'since 2026-03-07T15:00:00+00:00',
+            f"since {format_local_display_timestamp('2026-03-07T15:00:00+00:00')}",
+        )
+        self.assertEqual(
+            result.summary_update.summary_status_last_wasapi_check,
+            format_local_display_timestamp('2026-03-07T15:00:00+00:00'),
         )
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '2')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '2.0 GB')
@@ -1370,6 +1398,10 @@ class TestCollectionReportingHelpers(TestCase):
 
         self.assertEqual(result.status_update.processing_status_main, STATUS_COMPLETED_WITH_SOME_FILE_FAILURES)
         self.assertEqual(result.status_update.processing_status_detail, '1 file operation failed')
+        self.assertEqual(
+            result.summary_update.summary_status_last_wasapi_check,
+            format_local_display_timestamp('2026-03-07T15:00:00+00:00'),
+        )
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
     def test_build_collection_failure_report_for_discovery_failure(self):
@@ -1389,6 +1421,10 @@ class TestCollectionReportingHelpers(TestCase):
         self.assertEqual(result.status_update.processing_status_main, 'discovery-failed')
         self.assertEqual(result.status_update.processing_status_detail, 'discovery failed after 2 partial records')
         self.assertEqual(result.status_update.status_last_fetch_file_count, '0')
+        self.assertEqual(
+            result.summary_update.summary_status_last_wasapi_check,
+            format_local_display_timestamp('2026-03-07T15:00:00+00:00'),
+        )
         self.assertEqual(result.summary_update.summary_status_server_path, '/tmp/storage/collections/123')
 
 

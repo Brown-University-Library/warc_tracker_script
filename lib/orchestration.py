@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import datetime as datetime_module
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -60,6 +61,17 @@ BLOCKING_COORDINATION_STATUSES = frozenset(
 )
 
 DOWNLOAD_PROGRESS_MILESTONES = (20, 40, 60, 80)
+
+
+def format_local_display_timestamp(timestamp_text: str) -> str:
+    """
+    Formats an ISO timestamp in the machine's local timezone to second precision.
+    Called by: build_collection_summary_update()
+    """
+    normalized_timestamp = timestamp_text.replace('Z', '+00:00')
+    parsed_timestamp = datetime_module.datetime.fromisoformat(normalized_timestamp)
+    result = parsed_timestamp.astimezone().isoformat(timespec='seconds')
+    return result
 
 
 class RunCoordinationError(RuntimeError):
@@ -859,8 +871,9 @@ def build_collection_summary_update(
     """
     collection_root = storage_root / 'collections' / str(collection_id)
     total_downloaded_count, total_downloaded_size = get_collection_downloaded_totals(storage_root, collection_id)
+    displayed_download_timestamp = format_local_display_timestamp(discovery_completed_at)
     result = CollectionSummaryUpdate(
-        last_download_timestamp=discovery_completed_at,
+        last_download_timestamp=displayed_download_timestamp,
         total_col_warc_count=str(total_downloaded_count),
         total_downloaded_collection_size=format_downloaded_size_gb(total_downloaded_size),
         server_file_path_collection_level=str(collection_root),
@@ -892,7 +905,7 @@ def build_collection_final_report(
     latest_fetch_file_count = count_discovered_warc_filename_records(discovery_records)
     if not planned_downloads:
         status_main = STATUS_NO_NEW_FILES_TO_DOWNLOAD
-        status_detail = f'since {discovery_completed_at}'
+        status_detail = f'since {format_local_display_timestamp(discovery_completed_at)}'
     elif failure_count > 0:
         status_main = STATUS_COMPLETED_WITH_SOME_FILE_FAILURES
         operation_noun = 'operation' if failure_count == 1 else 'operations'
@@ -932,7 +945,7 @@ def build_collection_failure_report(
             status_last_fetch_file_count='0',
         ),
         summary_update=CollectionSummaryUpdate(
-            last_download_timestamp=reported_at,
+            last_download_timestamp=format_local_display_timestamp(reported_at),
             total_col_warc_count='0',
             total_downloaded_collection_size='0.0 GB',
             server_file_path_collection_level=str(storage_root / 'collections' / str(collection_job.collection_id)),
@@ -975,7 +988,7 @@ def write_collection_start_status(
         log.info('Collection %s store-time-after boundary: %s.', collection_job.collection_id, after_datetime.isoformat())
     status_detail = 'full historical backfill'
     if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
-        status_detail = f'store-time-after {after_datetime.isoformat()}'
+        status_detail = f'store-time-after {format_local_display_timestamp(after_datetime.isoformat())}'
     status_update = build_collection_status_update(STATUS_DISCOVERY_IN_PROGRESS, status_detail, '')
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
