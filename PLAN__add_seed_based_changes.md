@@ -1,5 +1,40 @@
 # Plan: seed-based storage layout and updated spreadsheet fields
 
+## Context
+
+This plan is for `warc_tracker_script`, a Python 3.12 project run with `uv`.
+
+Primary project files to review before implementation:
+
+- `AGENTS.md` for coding directives.
+- `README.md` for project purpose and operator workflow.
+- `main.py` for CLI/environment setup.
+- `lib/orchestration.py` for WASAPI discovery, download planning, run coordination, and final reporting.
+- `lib/storage_layout.py` for WARC/fixity path construction and on-disk summary scans.
+- `lib/collection_sheet.py` for Google Sheets parsing, validation, and status/summary writes.
+- `validate_spreadsheet_connection.py` for development-time spreadsheet validation.
+- `tests/` for the expected unit-test style.
+
+Project conventions that matter for this work:
+
+- Run scripts from the project directory with `uv run ./script_name.py`; `.env` is loaded from there.
+- Use `uv run ./run_tests.py` for tests.
+- The spreadsheet id can come from `GSHEET_SPREADSHEET_ID`.
+- Archive-It WASAPI credentials are available from dotenv when commands are run from the project directory.
+- Local WARC storage root comes from `WARC_STORAGE_ROOT`.
+- Keep code changes focused, use top-level helper functions rather than nested functions, and prefer clear dataclasses for structured state.
+
+Client/request context:
+
+- The client asked for WARC files to be saved by seed id:
+  `collections/<collection_id>/<seed_id>/<year>/<month>/<filename>`.
+- The client copy spreadsheet has revised collection-level reporting columns.
+- Some old spreadsheet columns are struck through and should not be updated.
+- The plan assumes current development data can be deleted manually; no old-layout migration is needed.
+- Seed folders should use the self-describing form `SEED2761639`.
+- WARC files without a parseable seed id should go under `UNKNOWN_SEED`.
+- Add a cron-oriented checker for `UNKNOWN_SEED` files and email named recipients from dotenv.
+
 ## Context reviewed
 
 - Reviewed `AGENTS.md` and followed the project directives: Python 3.12 style, `uv` execution, `unittest`, no nested functions, single-return preference, and keeping production logic in focused helpers/modules.
