@@ -13,6 +13,23 @@ If other instruction files exist (Copilot, IDE rules, contributor docs) and conf
 - Project-root is the directory containing this file (and `.git/`, and `.gitignore`).
 
 
+## Project index
+
+- `main.py` is the production entry point. It loads `.env`, requires `LOG_PATH`, configures logging, reads `GSHEET_SPREADSHEET_ID`, Archive-It credentials, `WARC_STORAGE_ROOT`, and `ARCHIVEIT_WASAPI_BASE_URL`, then runs the sequential collection orchestration.
+- `lib/orchestration.py` is the main workflow coordinator. It handles startup spreadsheet coordination, discovery mode selection, spreadsheet status transitions, download planning, manifest reconciliation, download/fixity execution, final reporting, and failure reporting.
+- `lib/collection_sheet.py` owns Google Sheets access and worksheet contracts: service-account credentials, the `At Collection Level` worksheet, header alias matching, active collection parsing, required reporting-column validation, and batched status/summary writes.
+- `lib/wasapi_discovery.py` owns Archive-It WASAPI enumeration: UTC datetime parsing/formatting, overlap-window checkpoint boundaries, paginated fetches, record extraction, next-page detection, max `store-time` checkpointing, and partial discovery errors.
+- `lib/storage_layout.py` maps WARC filenames to local storage paths. It extracts year/month from WARC timestamps and plans `collections/<collection_id>/warcs/<year>/<month>/...` plus matching fixity sidecar paths.
+- `lib/local_state.py` owns per-collection `state.json`: default state, load/normalize validation, atomic saves, and durable file-manifest updates for planned, downloaded, failed, and fixity states.
+- `lib/downloader.py` streams one URL to disk with `*.partial` files and atomic replacement, returning a `DownloadResult` instead of raising for normal download failures.
+- `lib/fixity.py` computes SHA-256, validates existing sidecars, and writes `.sha256` and `.json` fixity files atomically.
+- `tmp_inspect_collection_wasapi.py` is an investigative CLI for capturing raw WASAPI metadata pages and derived summaries for one collection; it does not download WARC files.
+- `other/gsheet_screenshots.py` is a standalone Playwright/uv script for recurring Google Sheet screenshots.
+- `run_tests.py` is the unittest runner; use `uv run ./run_tests.py` for all tests or pass dotted unittest targets for focused runs.
+- `tests/` mirrors the core modules, with the broadest behavioral coverage in `tests/test_orchestration.py`.
+- `README.md` explains the operational model: active collections come from the sheet, local storage is the source of truth, first runs do full backfill, later runs use a 30-day `store-time` overlap, and spreadsheet writes are coarse reporting checkpoints.
+
+
 ## How to run code
 
 - Assume user is in the project-root directory.
