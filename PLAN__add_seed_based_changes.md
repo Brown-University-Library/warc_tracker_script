@@ -97,12 +97,12 @@ Implementation plan:
    - Update path builders to include `seed_id`.
    - Update tests in `tests/test_storage_layout.py`.
 
-3. Decide and implement fixity sidecar placement.
-   - Option A: co-locate sidecars next to the WARC:
+3. Decide and implement where fixity files should be stored.
+   - Option A: store fixity files next to the WARC:
      `collections/<collection_id>/<seed_id>/<year>/<month>/<filename>.sha256`
    - Option B: keep a separate parallel fixity tree:
      `collections/<collection_id>/fixity/<seed_id>/<year>/<month>/<filename>.sha256`
-   - Recommendation: use Option A unless there is a strong reason to keep sidecars separate. It keeps each seed/year/month folder self-contained and matches the requested operator-facing structure.
+   - Recommendation: use Option A unless there is a strong reason to keep fixity files separate. It keeps each seed/year/month folder self-contained and matches the requested operator-facing structure.
 
 4. Update download planning.
    - `build_planned_download_paths()` and `build_planned_downloads()` should pass the parsed `seed_id` from the filename into storage planning.
@@ -124,7 +124,7 @@ Implementation plan:
    - Recommendation: add a small migration/reconciliation step that, for each known downloaded file:
      - derives the new seed-based path,
      - if the old file exists and the new file is missing, moves or copies it to the new path,
-     - regenerates or relocates fixity sidecars,
+     - regenerates or relocates fixity files,
      - updates `state.json`.
    - Make this idempotent and test it with temporary directories before running on real storage.
 
@@ -224,7 +224,7 @@ Recommendation:
 1. Should seed folders be named `SEED2761639` or just `2761639`?
    - Recommendation: `SEED2761639`, because it is self-describing and matches filenames/schema.
 
-2. Where should fixity sidecars live?
+2. Where should fixity files live?
    - Next to the WARC files, or in a parallel `fixity/` tree?
    - Recommendation: co-locate unless client/operator expects a separate fixity tree.
 
@@ -262,7 +262,7 @@ Recommendation:
 - `uv run ./validate_spreadsheet_connection.py` succeeds against the updated copy spreadsheet after alias/reporting changes.
 - Active rows are parsed from the new row-3 headers.
 - Downloaded WARC files are stored under `collections/<collection_id>/<seed_id>/<year>/<month>/`.
-- Fixity sidecar placement is implemented according to the chosen decision.
+- Fixity file placement is implemented according to the chosen decision.
 - Final collection-level reporting writes only active new columns, not struck-through duplicates.
 - The new final report includes:
   - `status-last-fetch`
