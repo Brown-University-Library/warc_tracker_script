@@ -219,6 +219,12 @@ If a WARC filename does not include a parseable `SEED...` value, the file is sto
 
 - The in-progress download updates are intentionally coarse rather than per-file chatter.
 
+- `status-last-fetch` holds the coarse machine-readable status, such as `discovery-in-progress` or `downloading-in-progress`.
+
+- `status-detail` holds the human-readable detail for that status, including discovery mode, no-new-files notes, final outcome details, and coarse download progress such as `40% (2/5 files)`.
+
+- `status-last-fetch-file-count` holds the numeric count of WARC filename records returned by the latest WASAPI fetch.
+
 - This keeps the sheet useful for monitoring without making spreadsheet state responsible for correctness.
 
 ---

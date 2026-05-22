@@ -646,11 +646,14 @@ class TestProcessCollectionJob(TestCase):
         self.assertIsNone(mock_fetch.call_args.kwargs['after_datetime'])
         status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(status_updates[0].processing_status_main, STATUS_DISCOVERY_IN_PROGRESS)
-        self.assertEqual(status_updates[0].processing_status_detail, '')
+        self.assertEqual(status_updates[0].processing_status_detail, 'full historical backfill')
+        self.assertEqual(status_updates[0].status_last_fetch_file_count, '')
         self.assertEqual(status_updates[1].processing_status_main, STATUS_DOWNLOAD_PLANNING_COMPLETE)
-        self.assertEqual(status_updates[1].processing_status_detail, '1')
+        self.assertEqual(status_updates[1].processing_status_detail, 'download planning complete')
+        self.assertEqual(status_updates[1].status_last_fetch_file_count, '1')
         self.assertEqual(status_updates[2].processing_status_main, STATUS_DOWNLOADING_IN_PROGRESS)
-        self.assertEqual(status_updates[2].processing_status_detail, '1')
+        self.assertEqual(status_updates[2].processing_status_detail, '0% (0/1 files)')
+        self.assertEqual(status_updates[2].status_last_fetch_file_count, '1')
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_download.call_count, 1)
@@ -661,6 +664,8 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_update_status.call_args.args[2], 7)
         self.assertEqual(mock_final_reporting.call_args.args[2], 7)
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
+        self.assertEqual(result.status_update.processing_status_detail, '1 file download completed successfully')
+        self.assertEqual(result.status_update.status_last_fetch_file_count, '1')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
@@ -720,10 +725,16 @@ class TestProcessCollectionJob(TestCase):
         status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(status_updates[0].processing_status_main, STATUS_DISCOVERY_IN_PROGRESS)
         self.assertEqual(status_updates[1].processing_status_main, STATUS_DOWNLOAD_PLANNING_COMPLETE)
-        self.assertEqual(status_updates[1].processing_status_detail, '0')
+        self.assertEqual(status_updates[1].processing_status_detail, 'download planning complete')
+        self.assertEqual(status_updates[1].status_last_fetch_file_count, '0')
         self.assertEqual(status_updates[2].processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
-        self.assertEqual(status_updates[2].processing_status_detail, '0')
+        self.assertEqual(status_updates[2].processing_status_detail, 'no new files to download')
+        self.assertEqual(status_updates[2].status_last_fetch_file_count, '0')
         self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
+        self.assertEqual(
+            result.status_update.processing_status_detail,
+            'since 2026-03-07T15:00:00+00:00',
+        )
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
@@ -989,7 +1000,7 @@ class TestProcessCollectionJob(TestCase):
         status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(
             status_updates[0].processing_status_detail,
-            '',
+            'store-time-after 2026-01-30T12:00:00+00:00',
         )
         self.assertEqual(mock_save.call_args.args[2]['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
 
@@ -1333,6 +1344,10 @@ class TestCollectionReportingHelpers(TestCase):
             )
 
         self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
+        self.assertEqual(
+            result.status_update.processing_status_detail,
+            'since 2026-03-07T15:00:00+00:00',
+        )
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '2')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '2.0 GB')
 
@@ -1354,6 +1369,7 @@ class TestCollectionReportingHelpers(TestCase):
         )
 
         self.assertEqual(result.status_update.processing_status_main, STATUS_COMPLETED_WITH_SOME_FILE_FAILURES)
+        self.assertEqual(result.status_update.processing_status_detail, '1 file operation failed')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
     def test_build_collection_failure_report_for_discovery_failure(self):
@@ -1371,7 +1387,8 @@ class TestCollectionReportingHelpers(TestCase):
         )
 
         self.assertEqual(result.status_update.processing_status_main, 'discovery-failed')
-        self.assertEqual(result.status_update.processing_status_detail, '0')
+        self.assertEqual(result.status_update.processing_status_detail, 'discovery failed after 2 partial records')
+        self.assertEqual(result.status_update.status_last_fetch_file_count, '0')
         self.assertEqual(result.summary_update.summary_status_server_path, '/tmp/storage/collections/123')
 
 

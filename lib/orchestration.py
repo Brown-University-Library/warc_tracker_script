@@ -506,13 +506,18 @@ def persist_planned_downloads_to_state(
     )
 
 
-def build_collection_status_update(status_last_fetch: str, status_last_fetch_file_count: int | str) -> CollectionProcessingStatusUpdate:
+def build_collection_status_update(
+    status_last_fetch: str,
+    status_detail: str,
+    status_last_fetch_file_count: int | str,
+) -> CollectionProcessingStatusUpdate:
     """
     Builds a collection-level processing status payload.
     Called by: write_collection_start_status()
     """
     result = CollectionProcessingStatusUpdate(
         status_last_fetch=status_last_fetch,
+        status_detail=status_detail,
         status_last_fetch_file_count=str(status_last_fetch_file_count),
     )
     return result
@@ -538,6 +543,7 @@ def build_download_planning_status(discovered_warc_count: int) -> CollectionProc
     """
     result = build_collection_status_update(
         STATUS_DOWNLOAD_PLANNING_COMPLETE,
+        'download planning complete',
         discovered_warc_count,
     )
     return result
@@ -550,18 +556,23 @@ def build_no_new_files_status(discovered_warc_count: int) -> CollectionProcessin
     """
     result = build_collection_status_update(
         STATUS_NO_NEW_FILES_TO_DOWNLOAD,
+        'no new files to download',
         discovered_warc_count,
     )
     return result
 
 
-def build_download_start_status(discovered_warc_count: int) -> CollectionProcessingStatusUpdate:
+def build_download_start_status(
+    discovered_warc_count: int,
+    planned_download_count: int,
+) -> CollectionProcessingStatusUpdate:
     """
     Builds the initial collection-level download-in-progress status update.
     Called by: write_collection_download_start_status()
     """
     result = build_collection_status_update(
         STATUS_DOWNLOADING_IN_PROGRESS,
+        build_download_progress_detail(0, 0, planned_download_count),
         discovered_warc_count,
     )
     return result
@@ -875,15 +886,22 @@ def build_collection_final_report(
     failure_count += sum(1 for result in fixity_results if not result.success)
     discovery_records = discovered_records if discovered_records is not None else []
     status_main = STATUS_DOWNLOADED_WITHOUT_ERRORS
+    successful_download_count = sum(1 for result in download_results if result.success)
+    download_noun = 'download' if successful_download_count == 1 else 'downloads'
+    status_detail = f'{successful_download_count} file {download_noun} completed successfully'
     latest_fetch_file_count = count_discovered_warc_filename_records(discovery_records)
     if not planned_downloads:
         status_main = STATUS_NO_NEW_FILES_TO_DOWNLOAD
+        status_detail = f'since {discovery_completed_at}'
     elif failure_count > 0:
         status_main = STATUS_COMPLETED_WITH_SOME_FILE_FAILURES
+        operation_noun = 'operation' if failure_count == 1 else 'operations'
+        status_detail = f'{failure_count} file {operation_noun} failed'
     observed_seed_count = get_collection_observed_seed_count(storage_root, collection_job.collection_id, discovery_records)
     result = CollectionProcessingReport(
         status_update=CollectionProcessingStatusUpdate(
             status_last_fetch=status_main,
+            status_detail=status_detail,
             status_last_fetch_file_count=str(latest_fetch_file_count),
         ),
         summary_update=build_collection_summary_update(
@@ -910,6 +928,7 @@ def build_collection_failure_report(
     result = CollectionProcessingReport(
         status_update=CollectionProcessingStatusUpdate(
             status_last_fetch=status_main,
+            status_detail=status_detail,
             status_last_fetch_file_count='0',
         ),
         summary_update=CollectionSummaryUpdate(
@@ -954,7 +973,10 @@ def write_collection_start_status(
     log.info('Collection %s discovery mode: %s.', collection_job.collection_id, discovery_mode)
     if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
         log.info('Collection %s store-time-after boundary: %s.', collection_job.collection_id, after_datetime.isoformat())
-    status_update = build_collection_status_update(STATUS_DISCOVERY_IN_PROGRESS, '')
+    status_detail = 'full historical backfill'
+    if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
+        status_detail = f'store-time-after {after_datetime.isoformat()}'
+    status_update = build_collection_status_update(STATUS_DISCOVERY_IN_PROGRESS, status_detail, '')
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
@@ -991,12 +1013,13 @@ def write_collection_download_start_status(
     header_location: HeaderLocation,
     collection_job: CollectionJob,
     discovered_warc_count: int,
+    planned_download_count: int,
 ) -> None:
     """
     Writes the collection-level status when sequential downloading begins.
     Called by: process_collection_job()
     """
-    status_update = build_download_start_status(discovered_warc_count)
+    status_update = build_download_start_status(discovered_warc_count, planned_download_count)
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
@@ -1004,13 +1027,18 @@ def write_collection_download_progress_status(
     worksheet: gspread.Worksheet,
     header_location: HeaderLocation,
     collection_job: CollectionJob,
+    progress_detail: str,
     discovered_warc_count: int,
 ) -> None:
     """
     Writes one coarse collection-level download progress milestone.
     Called by: process_collection_job.<lambda>()
     """
-    status_update = build_collection_status_update(STATUS_DOWNLOADING_IN_PROGRESS, discovered_warc_count)
+    status_update = build_collection_status_update(
+        STATUS_DOWNLOADING_IN_PROGRESS,
+        progress_detail,
+        discovered_warc_count,
+    )
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
@@ -1153,6 +1181,7 @@ def process_collection_job(
             header_location,
             collection_job,
             discovered_warc_count,
+            len(active_downloads),
         )
         log.info(
             'Collection %s spreadsheet status updated: downloading in progress for %s planned files.',
@@ -1169,6 +1198,7 @@ def process_collection_job(
             worksheet,
             header_location,
             collection_job,
+            progress_detail,
             discovered_warc_count,
         ),
     )

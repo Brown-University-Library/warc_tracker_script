@@ -15,6 +15,7 @@ COLLECTION_SHEET_NAME = 'At Collection Level'
 REQUIRED_HEADER_FIELDS = ('collection_id', 'active_inactive')
 REQUIRED_REPORTING_FIELDS = (
     'status_last_fetch',
+    'status_detail',
     'status_last_fetch_file_count',
     'last_download_timestamp',
     'total_col_warc_count',
@@ -31,10 +32,12 @@ HEADER_ALIASES: dict[str, set[str]] = {
     'seed_count': {'seed count'},
     'active_inactive': {'active/inactive', 'active / inactive'},
     'status_last_fetch': {'status-last-fetch', 'processing_status_main', 'status-main'},
+    'status_detail': {
+        'status-detail',
+        'processing_status_detail',
+    },
     'status_last_fetch_file_count': {
         'status-last-fetch-file-count',
-        'processing_status_detail',
-        'status-detail',
     },
     'last_download_timestamp': {
         'last-download-timestamp',
@@ -107,11 +110,13 @@ class CollectionProcessingStatusUpdate:
     """
 
     status_last_fetch: str
+    status_detail: str
     status_last_fetch_file_count: str
 
     def __init__(
         self,
         status_last_fetch: str | None = None,
+        status_detail: str | None = None,
         status_last_fetch_file_count: str | None = None,
         processing_status_main: str | None = None,
         processing_status_detail: str | None = None,
@@ -121,12 +126,10 @@ class CollectionProcessingStatusUpdate:
         Called by: orchestration.build_collection_status_update()
         """
         resolved_status = status_last_fetch if status_last_fetch is not None else processing_status_main
-        resolved_count = (
-            status_last_fetch_file_count
-            if status_last_fetch_file_count is not None
-            else processing_status_detail
-        )
+        resolved_detail = status_detail if status_detail is not None else processing_status_detail
+        resolved_count = status_last_fetch_file_count
         object.__setattr__(self, 'status_last_fetch', resolved_status or '')
+        object.__setattr__(self, 'status_detail', resolved_detail or '')
         object.__setattr__(self, 'status_last_fetch_file_count', resolved_count or '')
 
     @property
@@ -144,7 +147,7 @@ class CollectionProcessingStatusUpdate:
         Returns the legacy status-detail field value.
         Called by: no_production_caller()
         """
-        result = self.status_last_fetch_file_count
+        result = self.status_detail
         return result
 
 
@@ -463,7 +466,7 @@ def get_column_index(header_location: HeaderLocation, field_name: str) -> int:
     """
     legacy_field_names = {
         'status_last_fetch': ('processing_status_main',),
-        'status_last_fetch_file_count': ('processing_status_detail',),
+        'status_detail': ('processing_status_detail',),
         'last_download_timestamp': ('summary_status_last_wasapi_check',),
         'total_col_warc_count': ('summary_status_downloaded_warcs_count',),
         'total_downloaded_collection_size': ('summary_status_downloaded_warcs_size',),
@@ -504,6 +507,10 @@ def build_collection_status_cell_updates(
         {
             'range': gspread.utils.rowcol_to_a1(row_number, get_column_index(header_location, 'status_last_fetch') + 1),
             'values': [[status_update.status_last_fetch]],
+        },
+        {
+            'range': gspread.utils.rowcol_to_a1(row_number, get_column_index(header_location, 'status_detail') + 1),
+            'values': [[status_update.status_detail]],
         },
         {
             'range': gspread.utils.rowcol_to_a1(

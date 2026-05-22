@@ -96,13 +96,14 @@ class TestParseCollectionJobs(TestCase):
                 'Active/Inactive',
                 'Seed Count',
                 'status-last-fetch',
+                'status-detail',
                 'status-last-fetch-file-count',
                 'last-download-timestamp',
                 'total-col-WARC-count',
                 'total-downloaded-collection-size',
                 'server-file-path-collectionLevel',
             ],
-            ['123', 'Active', '', '', '', '', '', '', ''],
+            ['123', 'Active', '', '', '', '', '', '', '', ''],
         ]
         client = MagicMock()
         spreadsheet = MagicMock()
@@ -115,11 +116,12 @@ class TestParseCollectionJobs(TestCase):
         self.assertEqual(result.header_location.header_row_index, 2)
         self.assertEqual(result.header_location.column_map['seed_count'], 2)
         self.assertEqual(result.header_location.column_map['status_last_fetch'], 3)
-        self.assertEqual(result.header_location.column_map['status_last_fetch_file_count'], 4)
-        self.assertEqual(result.header_location.column_map['last_download_timestamp'], 5)
-        self.assertEqual(result.header_location.column_map['total_col_warc_count'], 6)
-        self.assertEqual(result.header_location.column_map['total_downloaded_collection_size'], 7)
-        self.assertEqual(result.header_location.column_map['server_file_path_collection_level'], 8)
+        self.assertEqual(result.header_location.column_map['status_detail'], 4)
+        self.assertEqual(result.header_location.column_map['status_last_fetch_file_count'], 5)
+        self.assertEqual(result.header_location.column_map['last_download_timestamp'], 6)
+        self.assertEqual(result.header_location.column_map['total_col_warc_count'], 7)
+        self.assertEqual(result.header_location.column_map['total_downloaded_collection_size'], 8)
+        self.assertEqual(result.header_location.column_map['server_file_path_collection_level'], 9)
 
 
 class TestCollectionReportingContract(TestCase):
@@ -137,17 +139,18 @@ class TestCollectionReportingContract(TestCase):
                 'collection_id': 0,
                 'active_inactive': 1,
                 'status_last_fetch': 2,
-                'last_download_timestamp': 3,
-                'total_col_warc_count': 4,
-                'total_downloaded_collection_size': 5,
-                'server_file_path_collection_level': 6,
+                'status_last_fetch_file_count': 3,
+                'last_download_timestamp': 4,
+                'total_col_warc_count': 5,
+                'total_downloaded_collection_size': 6,
+                'server_file_path_collection_level': 7,
             },
         )
 
         with self.assertRaises(CollectionSheetContractError) as exc_context:
             validate_required_reporting_fields(header_location)
 
-        self.assertIn('status_last_fetch_file_count', str(exc_context.exception))
+        self.assertIn('status_detail', str(exc_context.exception))
 
     def test_start_status_write_uses_expected_row_and_payload(self):
         """
@@ -158,11 +161,13 @@ class TestCollectionReportingContract(TestCase):
             header_row_index=1,
             column_map={
                 'status_last_fetch': 4,
-                'status_last_fetch_file_count': 5,
+                'status_detail': 5,
+                'status_last_fetch_file_count': 6,
             },
         )
         status_update = CollectionProcessingStatusUpdate(
             status_last_fetch='discovery-in-progress',
+            status_detail='full historical backfill',
             status_last_fetch_file_count='12',
         )
 
@@ -172,7 +177,8 @@ class TestCollectionReportingContract(TestCase):
             worksheet.batch_update.call_args.args[0],
             [
                 {'range': 'E7', 'values': [['discovery-in-progress']]},
-                {'range': 'F7', 'values': [['12']]},
+                {'range': 'F7', 'values': [['full historical backfill']]},
+                {'range': 'G7', 'values': [['12']]},
             ],
         )
 
@@ -185,16 +191,18 @@ class TestCollectionReportingContract(TestCase):
             header_row_index=1,
             column_map={
                 'status_last_fetch': 0,
-                'status_last_fetch_file_count': 1,
-                'last_download_timestamp': 2,
-                'total_col_warc_count': 3,
-                'total_downloaded_collection_size': 4,
-                'server_file_path_collection_level': 5,
-                'seed_count': 6,
+                'status_detail': 1,
+                'status_last_fetch_file_count': 2,
+                'last_download_timestamp': 3,
+                'total_col_warc_count': 4,
+                'total_downloaded_collection_size': 5,
+                'server_file_path_collection_level': 6,
+                'seed_count': 7,
             },
         )
         status_update = CollectionProcessingStatusUpdate(
             status_last_fetch='downloaded-without-errors',
+            status_detail='1 file download completed successfully',
             status_last_fetch_file_count='1',
         )
         summary_update = CollectionSummaryUpdate(
@@ -211,12 +219,13 @@ class TestCollectionReportingContract(TestCase):
             worksheet.batch_update.call_args.args[0],
             [
                 {'range': 'A9', 'values': [['downloaded-without-errors']]},
-                {'range': 'B9', 'values': [['1']]},
-                {'range': 'C9', 'values': [['2026-03-07T15:00:00+00:00']]},
-                {'range': 'D9', 'values': [['1']]},
-                {'range': 'E9', 'values': [['0.0 GB']]},
-                {'range': 'F9', 'values': [['/tmp/storage/collections/123']]},
-                {'range': 'G9', 'values': [['1']]},
+                {'range': 'B9', 'values': [['1 file download completed successfully']]},
+                {'range': 'C9', 'values': [['1']]},
+                {'range': 'D9', 'values': [['2026-03-07T15:00:00+00:00']]},
+                {'range': 'E9', 'values': [['1']]},
+                {'range': 'F9', 'values': [['0.0 GB']]},
+                {'range': 'G9', 'values': [['/tmp/storage/collections/123']]},
+                {'range': 'H9', 'values': [['1']]},
             ],
         )
 
@@ -260,13 +269,14 @@ class TestCollectionSheetConnectionValidation(TestCase):
                 'Active/Inactive',
                 'Seed Count',
                 'status-last-fetch',
+                'status-detail',
                 'status-last-fetch-file-count',
                 'last-download-timestamp',
                 'total-col-WARC-count',
                 'total-downloaded-collection-size',
                 'server-file-path-collectionLevel',
             ],
-            ['123', 'Active', '', '', '', '', '', '', ''],
+            ['123', 'Active', '', '', '', '', '', '', '', ''],
         ]
         client = MagicMock()
         spreadsheet = MagicMock()
