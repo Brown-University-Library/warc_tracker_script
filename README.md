@@ -68,6 +68,12 @@ Run the backup workflow:
 uv run ./main.py
 ```
 
+Validate that a spreadsheet can be opened, parsed, and edited before running the backup workflow:
+
+```shell
+uv run ./validate_spreadsheet_connection.py --spreadsheet-id the-google-sheet-id
+```
+
 Run tests:
 
 ```shell

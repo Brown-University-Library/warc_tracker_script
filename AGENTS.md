@@ -23,6 +23,7 @@ If other instruction files exist (Copilot, IDE rules, contributor docs) and conf
 - `lib/local_state.py` owns per-collection `state.json`: default state, load/normalize validation, atomic saves, and durable file-manifest updates for planned, downloaded, failed, and fixity states.
 - `lib/downloader.py` streams one URL to disk with `*.partial` files and atomic replacement, returning a `DownloadResult` instead of raising for normal download failures.
 - `lib/fixity.py` computes SHA-256, validates existing sidecars, and writes `.sha256` and `.json` fixity files atomically.
+- `validate_spreadsheet_connection.py` is a standalone development CLI for checking whether a configured or supplied spreadsheet can be opened, parsed, and edited before running the production backup workflow.
 - `tmp_inspect_collection_wasapi.py` is an investigative CLI for capturing raw WASAPI metadata pages and derived summaries for one collection; it does not download WARC files.
 - `other/gsheet_screenshots.py` is a standalone Playwright/uv script for recurring Google Sheet screenshots.
 - `run_tests.py` is the unittest runner; use `uv run ./run_tests.py` for all tests or pass dotted unittest targets for focused runs.

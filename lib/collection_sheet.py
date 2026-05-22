@@ -290,7 +290,7 @@ def validate_required_reporting_fields(header_location: HeaderLocation) -> None:
 def load_collection_sheet_context(spreadsheet_id: str) -> CollectionSheetContext:
     """
     Loads the collection worksheet, validates the reporting contract, and parses active collection jobs.
-    Called by: run_collection_orchestration()
+    Called by: run_collection_orchestration(), validate_collection_sheet_connection()
     """
     worksheet = get_collection_worksheet(spreadsheet_id, read_only=False)
     values = worksheet.get_all_values()
@@ -305,6 +305,38 @@ def load_collection_sheet_context(spreadsheet_id: str) -> CollectionSheetContext
         values=values,
         collection_jobs=collection_jobs,
     )
+    return result
+
+
+def build_spreadsheet_editability_probe_update(
+    values: list[list[str]],
+    header_location: HeaderLocation,
+) -> list[dict[str, object]]:
+    """
+    Builds a same-value worksheet update that can prove spreadsheet editability.
+    Called by: validate_collection_sheet_connection()
+    """
+    field_name = 'processing_status_main'
+    row_index = header_location.header_row_index
+    column_index = header_location.column_map[field_name]
+    cell_value = values[row_index][column_index]
+    result = [
+        {
+            'range': gspread.utils.rowcol_to_a1(row_index + 1, column_index + 1),
+            'values': [[cell_value]],
+        }
+    ]
+    return result
+
+
+def validate_collection_sheet_connection(spreadsheet_id: str) -> CollectionSheetContext:
+    """
+    Validates that the collection worksheet can be opened, parsed, and edited.
+    Called by: validate_spreadsheet_connection.run_validation()
+    """
+    result = load_collection_sheet_context(spreadsheet_id)
+    editability_probe_update = build_spreadsheet_editability_probe_update(result.values, result.header_location)
+    result.worksheet.batch_update(editability_probe_update)
     return result
 
 

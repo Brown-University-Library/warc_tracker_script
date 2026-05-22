@@ -11,11 +11,13 @@ from lib.collection_sheet import (
     CollectionSheetContractError,
     CollectionSummaryUpdate,
     HeaderLocation,
+    build_spreadsheet_editability_probe_update,
     load_collection_sheet_context,
     parse_collection_id,
     parse_collection_jobs,
     update_collection_final_reporting,
     update_collection_processing_status,
+    validate_collection_sheet_connection,
     validate_required_reporting_fields,
 )
 
@@ -212,6 +214,64 @@ class TestCollectionReportingContract(TestCase):
                 {'range': 'F9', 'values': [['/tmp/storage/collections/123']]},
             ],
         )
+
+
+class TestCollectionSheetConnectionValidation(TestCase):
+    """
+    Test cases for spreadsheet connection and editability validation.
+    """
+
+    def test_build_spreadsheet_editability_probe_update_targets_reporting_header(self):
+        """
+        Checks that the editability probe rewrites the status header cell with its existing value.
+        """
+        values = [
+            ['Notes above header'],
+            ['Collection ID', 'Active/Inactive', 'Status-Main'],
+            ['123', 'Active', ''],
+        ]
+        header_location = HeaderLocation(
+            header_row_index=1,
+            column_map={
+                'collection_id': 0,
+                'active_inactive': 1,
+                'processing_status_main': 2,
+            },
+        )
+
+        result = build_spreadsheet_editability_probe_update(values, header_location)
+
+        self.assertEqual(result, [{'range': 'C2', 'values': [['Status-Main']]}])
+
+    def test_validate_collection_sheet_connection_loads_context_and_writes_probe(self):
+        """
+        Checks that connection validation opens the worksheet and performs a same-value editability write.
+        """
+        worksheet = MagicMock()
+        worksheet.get_all_values.return_value = [
+            ['Notes above header'],
+            [
+                'Collection ID',
+                'Active/Inactive',
+                'Status-Main',
+                'Status-Detail',
+                'sum--Last-Check-Timestamp',
+                'sum--Downloaded-WARCs-Count',
+                'sum--Downloaded-WARCs-Size',
+                'sum--Downloaded-WARCs-Server-Path',
+            ],
+            ['123', 'Active', '', '', '', '', '', ''],
+        ]
+        client = MagicMock()
+        spreadsheet = MagicMock()
+        spreadsheet.worksheet.return_value = worksheet
+        client.open_by_key.return_value = spreadsheet
+
+        with patch('lib.collection_sheet.get_gspread_client', return_value=client):
+            result = validate_collection_sheet_connection('spreadsheet-id')
+
+        self.assertEqual(result.collection_jobs[0].collection_id, 123)
+        self.assertEqual(worksheet.batch_update.call_args.args[0], [{'range': 'C2', 'values': [['Status-Main']]}])
 
 
 if __name__ == '__main__':
