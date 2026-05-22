@@ -14,3 +14,8 @@ GSHEET_CREDENTIALS_JSON='{
 }'
 
 LOG_LEVEL="DEBUG"
+
+UNKNOWN_SEED_ALERT_RECIPIENTS='[["Name One", "name.one@example.edu"], ["Name Two", "name.two@example.edu"]]'
+UNKNOWN_SEED_ALERT_FROM_EMAIL="warc-tracker@example.edu"
+UNKNOWN_SEED_ALERT_SMTP_HOST="localhost"
+UNKNOWN_SEED_ALERT_SMTP_PORT="25"

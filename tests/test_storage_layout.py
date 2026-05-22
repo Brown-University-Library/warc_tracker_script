@@ -9,6 +9,7 @@ from lib.storage_layout import (
     StorageLayoutError,
     build_fixity_paths,
     build_warc_destination_path,
+    extract_warc_seed_id,
     extract_warc_timestamp_parts,
     plan_collection_paths,
 )
@@ -34,6 +35,28 @@ class TestExtractWarcTimestampParts(TestCase):
             extract_warc_timestamp_parts('example.warc.gz')
 
 
+class TestExtractWarcSeedId(TestCase):
+    """
+    Test cases for WARC filename seed-id parsing.
+    """
+
+    def test_extracts_normalized_seed_id_from_valid_warc_filename(self):
+        """
+        Checks that a valid Archive-It filename yields the expected seed folder name.
+        """
+        result = extract_warc_seed_id('ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz')
+
+        self.assertEqual(result, 'SEED789')
+
+    def test_returns_unknown_seed_for_filename_without_seed_id(self):
+        """
+        Checks that a filename without a seed id uses the unknown-seed folder.
+        """
+        result = extract_warc_seed_id('ARCHIVEIT-123-20260306123456-00000-example.warc.gz')
+
+        self.assertEqual(result, 'UNKNOWN_SEED')
+
+
 class TestBuildPaths(TestCase):
     """
     Test cases for local WARC and fixity path building.
@@ -48,34 +71,40 @@ class TestBuildPaths(TestCase):
         result = build_warc_destination_path(
             storage_root,
             123,
-            'ARCHIVEIT-123-20260306123456-00000-example.warc.gz',
+            'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz',
         )
 
         self.assertEqual(
             result,
-            storage_root / 'collections' / '123' / 'warcs' / '2026' / '03' / 'ARCHIVEIT-123-20260306123456-00000-example.warc.gz',
+            storage_root
+            / 'collections'
+            / '123'
+            / 'SEED789'
+            / '2026'
+            / '03'
+            / 'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz',
         )
 
     def test_builds_expected_fixity_paths(self):
         """
-        Checks that the fixity sidecar paths match the collection year/month layout.
+        Checks that the fixity paths are stored next to the WARC file.
         """
         storage_root = Path('/tmp/warc-storage')
 
         sha256_path, json_path = build_fixity_paths(
             storage_root,
             123,
-            'ARCHIVEIT-123-20260306123456-00000-example.warc.gz',
+            'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz',
         )
 
-        expected_root = storage_root / 'collections' / '123' / 'fixity' / '2026' / '03'
+        expected_root = storage_root / 'collections' / '123' / 'SEED789' / '2026' / '03'
         self.assertEqual(
             sha256_path,
-            expected_root / 'ARCHIVEIT-123-20260306123456-00000-example.warc.gz.sha256',
+            expected_root / 'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz.sha256',
         )
         self.assertEqual(
             json_path,
-            expected_root / 'ARCHIVEIT-123-20260306123456-00000-example.warc.gz.json',
+            expected_root / 'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz.json',
         )
 
     def test_plans_collection_paths_as_structured_result(self):
@@ -87,15 +116,22 @@ class TestBuildPaths(TestCase):
         result = plan_collection_paths(
             storage_root,
             123,
-            'ARCHIVEIT-123-20260306123456-00000-example.warc.gz',
+            'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz',
         )
 
-        self.assertEqual(result.filename, 'ARCHIVEIT-123-20260306123456-00000-example.warc.gz')
+        self.assertEqual(result.filename, 'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz')
         self.assertEqual(result.year, '2026')
         self.assertEqual(result.month, '03')
+        self.assertEqual(result.seed_id, 'SEED789')
         self.assertEqual(
             result.warc_path,
-            storage_root / 'collections' / '123' / 'warcs' / '2026' / '03' / 'ARCHIVEIT-123-20260306123456-00000-example.warc.gz',
+            storage_root
+            / 'collections'
+            / '123'
+            / 'SEED789'
+            / '2026'
+            / '03'
+            / 'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz',
         )
 
 

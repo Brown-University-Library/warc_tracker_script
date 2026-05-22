@@ -19,11 +19,12 @@ If other instruction files exist (Copilot, IDE rules, contributor docs) and conf
 - `lib/orchestration.py` is the main workflow coordinator. It handles startup spreadsheet coordination, discovery mode selection, spreadsheet status transitions, download planning, manifest reconciliation, download/fixity execution, final reporting, and failure reporting.
 - `lib/collection_sheet.py` owns Google Sheets access and worksheet contracts: service-account credentials, the `At Collection Level` worksheet, header alias matching, active collection parsing, required reporting-column validation, and batched status/summary writes.
 - `lib/wasapi_discovery.py` owns Archive-It WASAPI enumeration: UTC datetime parsing/formatting, overlap-window checkpoint boundaries, paginated fetches, record extraction, next-page detection, max `store-time` checkpointing, and partial discovery errors.
-- `lib/storage_layout.py` maps WARC filenames to local storage paths. It extracts year/month from WARC timestamps and plans `collections/<collection_id>/warcs/<year>/<month>/...` plus matching fixity sidecar paths.
+- `lib/storage_layout.py` maps WARC filenames to local storage paths. It extracts seed id plus year/month from WARC filenames and plans `collections/<collection_id>/<seed_id>/<year>/<month>/...` with matching fixity files stored next to the WARC.
 - `lib/local_state.py` owns per-collection `state.json`: default state, load/normalize validation, atomic saves, and durable file-manifest updates for planned, downloaded, failed, and fixity states.
 - `lib/downloader.py` streams one URL to disk with `*.partial` files and atomic replacement, returning a `DownloadResult` instead of raising for normal download failures.
 - `lib/fixity.py` computes SHA-256, validates existing sidecars, and writes `.sha256` and `.json` fixity files atomically.
 - `validate_spreadsheet_connection.py` is a standalone development CLI for checking whether a configured or supplied spreadsheet can be opened, parsed, and edited before running the production backup workflow.
+- `cron_scripts/check_for_unknown_seeds.py` is a cron-oriented development/operations script that scans storage for WARCs under `UNKNOWN_SEED` folders and sends an email alert to recipients configured in dotenv.
 - `tmp_inspect_collection_wasapi.py` is an investigative CLI for capturing raw WASAPI metadata pages and derived summaries for one collection; it does not download WARC files.
 - `other/gsheet_screenshots.py` is a standalone Playwright/uv script for recurring Google Sheet screenshots.
 - `run_tests.py` is the unittest runner; use `uv run ./run_tests.py` for all tests or pass dotted unittest targets for focused runs.

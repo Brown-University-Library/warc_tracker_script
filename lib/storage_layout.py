@@ -5,6 +5,8 @@ from pathlib import Path
 from lib.local_state import build_collection_root_path
 
 WARC_FILENAME_TIMESTAMP_PATTERN = re.compile(r'-(\d{4})(\d{2})\d{2}\d{6}(?:\d+)?-')
+WARC_FILENAME_SEED_PATTERN = re.compile(r'(?:^|-)SEED(?P<seed_digits>[0-9]+)(?:-|$)')
+UNKNOWN_SEED_FOLDER_NAME = 'UNKNOWN_SEED'
 
 
 class StorageLayoutError(ValueError):
@@ -25,6 +27,7 @@ class PlannedCollectionPaths:
     json_path: Path
     year: str
     month: str
+    seed_id: str
 
 
 def extract_warc_timestamp_parts(filename: str) -> tuple[str, str]:
@@ -39,6 +42,21 @@ def extract_warc_timestamp_parts(filename: str) -> tuple[str, str]:
     if match is None:
         raise StorageLayoutError(f'Could not extract year/month timestamp parts from filename: {filename}')
     result = (match.group(1), match.group(2))
+    return result
+
+
+def extract_warc_seed_id(filename: str) -> str:
+    """
+    Extracts the normalized seed id folder name from a WARC filename.
+    Called by: plan_collection_paths()
+    """
+    normalized_filename = filename.strip()
+    if not normalized_filename:
+        raise StorageLayoutError('WARC filename must not be blank.')
+    match = WARC_FILENAME_SEED_PATTERN.search(normalized_filename)
+    result = UNKNOWN_SEED_FOLDER_NAME
+    if match is not None:
+        result = f'SEED{match.group("seed_digits")}'
     return result
 
 
@@ -57,20 +75,19 @@ def build_warc_destination_path(storage_root: Path, collection_id: int, filename
     Called by: plan_collection_paths()
     """
     year, month = extract_warc_timestamp_parts(filename)
+    seed_id = extract_warc_seed_id(filename)
     collection_root = build_collection_storage_root(storage_root, collection_id)
-    result = collection_root / 'warcs' / year / month / filename
+    result = collection_root / seed_id / year / month / filename
     return result
 
 
 def build_fixity_paths(storage_root: Path, collection_id: int, filename: str) -> tuple[Path, Path]:
     """
-    Builds the fixity sidecar paths for one WARC file.
+    Builds the fixity file paths for one WARC file.
     Called by: plan_collection_paths()
     """
-    year, month = extract_warc_timestamp_parts(filename)
-    collection_root = build_collection_storage_root(storage_root, collection_id)
-    fixity_root = collection_root / 'fixity' / year / month
-    result = (fixity_root / f'{filename}.sha256', fixity_root / f'{filename}.json')
+    warc_path = build_warc_destination_path(storage_root, collection_id, filename)
+    result = (warc_path.with_name(f'{filename}.sha256'), warc_path.with_name(f'{filename}.json'))
     return result
 
 
@@ -80,6 +97,7 @@ def plan_collection_paths(storage_root: Path, collection_id: int, filename: str)
     Called by: build_planned_download_paths()
     """
     year, month = extract_warc_timestamp_parts(filename)
+    seed_id = extract_warc_seed_id(filename)
     warc_path = build_warc_destination_path(storage_root, collection_id, filename)
     sha256_path, json_path = build_fixity_paths(storage_root, collection_id, filename)
     result = PlannedCollectionPaths(
@@ -89,5 +107,6 @@ def plan_collection_paths(storage_root: Path, collection_id: int, filename: str)
         json_path=json_path,
         year=year,
         month=month,
+        seed_id=seed_id,
     )
     return result

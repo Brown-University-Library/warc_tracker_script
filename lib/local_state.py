@@ -99,6 +99,7 @@ def update_file_manifest_for_planned_download(
     source_url: str,
     warc_path: Path,
     discovered_at: str,
+    seed_id: str = '',
 ) -> dict[str, object]:
     """
     Updates one file manifest entry with durable pre-download planning metadata.
@@ -107,6 +108,8 @@ def update_file_manifest_for_planned_download(
     entry = get_file_manifest_entry(state, filename)
     entry['source_url'] = source_url
     entry['warc_path'] = str(warc_path)
+    if seed_id:
+        entry['seed_id'] = seed_id
     entry['discovered_at'] = discovered_at
     current_status = entry.get('status')
     if current_status != 'downloaded':
@@ -122,6 +125,7 @@ def update_file_manifest_for_download_result(
     warc_path: Path,
     success: bool,
     error_message: str | None,
+    seed_id: str = '',
 ) -> dict[str, object]:
     """
     Updates one file manifest entry with the durable download outcome.
@@ -132,6 +136,8 @@ def update_file_manifest_for_download_result(
     error_count = current_error_count if isinstance(current_error_count, int) else 0
     entry['source_url'] = source_url
     entry['warc_path'] = str(warc_path)
+    if seed_id:
+        entry['seed_id'] = seed_id
     entry['last_attempt_at'] = build_attempt_timestamp()
     entry['download_status'] = 'downloaded' if success else 'failed'
     if success:

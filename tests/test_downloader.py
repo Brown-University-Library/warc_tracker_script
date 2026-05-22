@@ -165,7 +165,7 @@ class TestOrchestrationDownloadConsumption(TestCase):
         download_result = MagicMock()
         download_result.success = True
         download_result.bytes_written = 11
-        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.destination_path = Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz')
 
         with (
             patch(
@@ -197,7 +197,7 @@ class TestOrchestrationDownloadConsumption(TestCase):
         self.assertEqual(mock_download.call_args.args[1], 'https://example.org/alpha.warc.gz')
         self.assertTrue(
             str(mock_download.call_args.args[2]).endswith(
-                '/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
+                '/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
             )
         )
         self.assertEqual(mock_log_summary.call_args.args[2], 1)

@@ -153,13 +153,13 @@ class TestPlannedDownloadManifestUpdates(TestCase):
             state=state,
             filename='alpha.warc.gz',
             source_url='https://example.org/alpha.warc.gz',
-            warc_path=Path('/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz'),
+            warc_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/alpha.warc.gz'),
             discovered_at='2026-03-07T15:00:00+00:00',
         )
 
         self.assertEqual(result['status'], 'pending_download')
         self.assertEqual(result['source_url'], 'https://example.org/alpha.warc.gz')
-        self.assertEqual(result['warc_path'], '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz')
+        self.assertEqual(result['warc_path'], '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/alpha.warc.gz')
         self.assertEqual(result['discovered_at'], '2026-03-07T15:00:00+00:00')
 
     def test_preserves_downloaded_status_when_refreshing_planned_metadata(self):
@@ -180,13 +180,13 @@ class TestPlannedDownloadManifestUpdates(TestCase):
             state=state,
             filename='alpha.warc.gz',
             source_url='https://example.org/alpha.warc.gz',
-            warc_path=Path('/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz'),
+            warc_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/alpha.warc.gz'),
             discovered_at='2026-03-07T15:00:00+00:00',
         )
 
         self.assertEqual(result['status'], 'downloaded')
         self.assertEqual(result['source_url'], 'https://example.org/alpha.warc.gz')
-        self.assertEqual(result['warc_path'], '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz')
+        self.assertEqual(result['warc_path'], '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/alpha.warc.gz')
         self.assertEqual(result['discovered_at'], '2026-03-07T15:00:00+00:00')
 
 

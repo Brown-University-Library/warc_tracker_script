@@ -56,9 +56,15 @@ LOG_LEVEL="INFO"
 WARC_STORAGE_ROOT="/path/to/storage"
 ARCHIVEIT_WASAPI_BASE_URL="https://warcs.archive-it.org/wasapi/v1/webdata"
 RUN_COORDINATION_MODE="skip_spreadsheet_coordination_check"
+UNKNOWN_SEED_ALERT_RECIPIENTS='[["Name One", "name.one@example.edu"], ["Name Two", "name.two@example.edu"]]'
+UNKNOWN_SEED_ALERT_FROM_EMAIL="warc-tracker@example.edu"
+UNKNOWN_SEED_ALERT_SMTP_HOST="localhost"
+UNKNOWN_SEED_ALERT_SMTP_PORT="25"
 ```
 
 `RUN_COORDINATION_MODE` is normally unset. When it is unset, startup checks active spreadsheet rows and refuses to start if any row already has a blocking in-progress status such as `discovery-in-progress` or `downloading-in-progress`. Set `RUN_COORDINATION_MODE="skip_spreadsheet_coordination_check"` only when an external cron or scheduler lock already guarantees that two copies of the script cannot run at the same time; that setting skips the spreadsheet coordination preflight.
+
+`UNKNOWN_SEED_ALERT_RECIPIENTS` is used by `cron_scripts/check_for_unknown_seeds.py`. It must be JSON that parses to a list of `(name, email_address)` pairs.
 
 ## Usage
 
@@ -87,6 +93,13 @@ Capture WASAPI metadata for one collection without downloading WARC files:
 uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./wasapi_inspection
 ```
 
+Check for downloaded WARC files that could not be assigned to a seed folder:
+
+```shell
+uv run ./cron_scripts/check_for_unknown_seeds.py --dry-run
+uv run ./cron_scripts/check_for_unknown_seeds.py
+```
+
 ## What the script does
 
 - Reads the tracking spreadsheet and selects active collections.
@@ -101,7 +114,7 @@ uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./w
 - The script will be run via a cron-job, but can also be run manually.
 - On a collection's first successful run, the script aims to do a full historical backfill.
 - On later runs, it re-checks a recent overlap window so that interrupted or partial runs are less likely to miss files.
-- Files are downloaded into a predictable collection-based folder structure.
+- Files are downloaded into a predictable collection/seed/year/month folder structure.
 - Each collection keeps a local `state.json` file so the script can remember what it has already seen and what may need retrying.
 
 ## Current state of the project
@@ -172,6 +185,16 @@ uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./w
   - fixity metadata files
   - a `state.json` file describing what the script has discovered and recorded for that collection
 
+WARC and fixity files are stored by seed id:
+
+```text
+collections/<collection_id>/<seed_id>/<year>/<month>/<filename>
+collections/<collection_id>/<seed_id>/<year>/<month>/<filename>.sha256
+collections/<collection_id>/<seed_id>/<year>/<month>/<filename>.json
+```
+
+If a WARC filename does not include a parseable `SEED...` value, the file is stored under `UNKNOWN_SEED`. The `cron_scripts/check_for_unknown_seeds.py` script can be scheduled to report those files by email.
+
 - This layout is meant to keep each collection self-contained and easier to inspect.
 
 ---
@@ -208,9 +231,10 @@ uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./w
 - `lib/collection_sheet.py` loads active collection jobs from the spreadsheet.
 - `lib/local_state.py` loads and saves `state.json` atomically and records durable[^durable] per-file download/fixity outcomes.
 - `lib/wasapi_discovery.py` performs production WASAPI discovery with overlap-window checkpoint logic.
-- `lib/storage_layout.py` derives year/month partitions from WARC filenames and computes planned WARC/fixity destinations.
+- `lib/storage_layout.py` derives seed/year/month partitions from WARC filenames and computes planned WARC/fixity destinations.
 - `lib/downloader.py` streams WARC files, writes to `*.partial`, removes stale partial files on retry, and atomically renames successful downloads into place.
-- `lib/fixity.py` computes SHA-256 and writes `.sha256` and `.json` sidecars for successfully downloaded WARCs.
+- `lib/fixity.py` computes SHA-256 and writes `.sha256` and `.json` fixity files for successfully downloaded WARCs.
+- `cron_scripts/check_for_unknown_seeds.py` scans for WARC files under `UNKNOWN_SEED` folders and sends an email alert when any are found.
 
 [^durable]: Here, durable means the recorded outcomes are meant to survive process exits, crashes, and later reruns because they are written into `state.json` on disk, not just kept in memory for the current execution.
 

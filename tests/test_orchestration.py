@@ -36,6 +36,7 @@ from lib.orchestration import (
     build_planned_download_paths,
     build_planned_downloads,
     build_reconciliation_retry_downloads,
+    count_discovered_warc_filename_records,
     count_pending_download_candidates,
     determine_collection_discovery_mode,
     enforce_startup_run_coordination,
@@ -233,6 +234,27 @@ class TestCountPendingDownloadCandidates(TestCase):
         self.assertEqual(result, 2)
 
 
+class TestCountDiscoveredWarcFilenameRecords(TestCase):
+    """
+    Test cases for latest-fetch file-count reporting.
+    """
+
+    def test_counts_only_records_with_usable_filenames(self):
+        """
+        Checks that latest-fetch file count ignores records without usable filenames.
+        """
+        discovered_records = [
+            {'filename': 'alpha.warc.gz'},
+            {'filename': '  '},
+            {'store-time': '2026-03-01T00:00:00Z'},
+            {'filename': 'beta.warc.gz'},
+        ]
+
+        result = count_discovered_warc_filename_records(discovered_records)
+
+        self.assertEqual(result, 2)
+
+
 class TestBuildPlannedDownloadPaths(TestCase):
     """
     Test cases for planned local destination-path building.
@@ -255,7 +277,7 @@ class TestBuildPlannedDownloadPaths(TestCase):
         self.assertEqual(result[0].month, '03')
         self.assertTrue(
             str(result[0].warc_path).endswith(
-                '/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
+                '/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
             )
         )
 
@@ -321,7 +343,7 @@ class TestDownloadPlanningHelpers(TestCase):
             'files': {
                 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
                     'source_url': 'https://example.org/alpha.warc.gz',
-                    'warc_path': '/tmp/storage/collections/123/warcs/2026/03/alpha.warc.gz',
+                    'warc_path': '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/alpha.warc.gz',
                 }
             }
         }
@@ -333,7 +355,7 @@ class TestDownloadPlanningHelpers(TestCase):
         self.assertEqual(result[0].source_url, 'https://example.org/alpha.warc.gz')
         self.assertTrue(
             str(result[0].planned_paths.warc_path).endswith(
-                '/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
+                '/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'
             )
         )
 
@@ -570,12 +592,12 @@ class TestProcessCollectionJob(TestCase):
         download_result = MagicMock()
         download_result.success = True
         download_result.bytes_written = 11
-        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.destination_path = Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz')
         fixity_result = FixityResult(
             success=True,
             warc_path=download_result.destination_path,
-            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
-            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.json'),
             sha256_hexdigest='abc123',
             size=11,
             source_url='https://example.org/alpha.warc.gz',
@@ -618,17 +640,17 @@ class TestProcessCollectionJob(TestCase):
         )
         self.assertEqual(
             planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['warc_path'],
-            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+            '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
         )
         self.assertEqual(saved_state['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
         self.assertIsNone(mock_fetch.call_args.kwargs['after_datetime'])
         status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(status_updates[0].processing_status_main, STATUS_DISCOVERY_IN_PROGRESS)
-        self.assertEqual(status_updates[0].processing_status_detail, 'full historical backfill')
+        self.assertEqual(status_updates[0].processing_status_detail, '')
         self.assertEqual(status_updates[1].processing_status_main, STATUS_DOWNLOAD_PLANNING_COMPLETE)
-        self.assertEqual(status_updates[1].processing_status_detail, '1 files planned')
+        self.assertEqual(status_updates[1].processing_status_detail, '1')
         self.assertEqual(status_updates[2].processing_status_main, STATUS_DOWNLOADING_IN_PROGRESS)
-        self.assertEqual(status_updates[2].processing_status_detail, '0% (0/1 files)')
+        self.assertEqual(status_updates[2].processing_status_detail, '1')
         self.assertEqual(mock_build_paths.call_args.args[1], 123)
         self.assertEqual(mock_log_paths.call_args.args[1], ['planned-path'])
         self.assertEqual(mock_download.call_count, 1)
@@ -698,9 +720,9 @@ class TestProcessCollectionJob(TestCase):
         status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(status_updates[0].processing_status_main, STATUS_DISCOVERY_IN_PROGRESS)
         self.assertEqual(status_updates[1].processing_status_main, STATUS_DOWNLOAD_PLANNING_COMPLETE)
-        self.assertEqual(status_updates[1].processing_status_detail, '0 files planned')
+        self.assertEqual(status_updates[1].processing_status_detail, '0')
         self.assertEqual(status_updates[2].processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
-        self.assertEqual(status_updates[2].processing_status_detail, 'since 2026-03-07T15:00:00+00:00')
+        self.assertEqual(status_updates[2].processing_status_detail, '0')
         self.assertEqual(result.status_update.processing_status_main, STATUS_NO_NEW_FILES_TO_DOWNLOAD)
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
@@ -742,12 +764,12 @@ class TestProcessCollectionJob(TestCase):
         download_result = MagicMock()
         download_result.success = True
         download_result.bytes_written = 11
-        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.destination_path = Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz')
         fixity_result = FixityResult(
             success=True,
             warc_path=download_result.destination_path,
-            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
-            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.json'),
             sha256_hexdigest='abc123',
             size=11,
             source_url='https://example.org/alpha.warc.gz',
@@ -791,7 +813,7 @@ class TestProcessCollectionJob(TestCase):
         )
         self.assertEqual(
             planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['warc_path'],
-            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+            '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
         )
         self.assertEqual(
             planning_state['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['source_url'],
@@ -844,12 +866,12 @@ class TestProcessCollectionJob(TestCase):
         download_result = MagicMock()
         download_result.success = True
         download_result.bytes_written = 11
-        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.destination_path = Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz')
         fixity_result = FixityResult(
             success=True,
             warc_path=download_result.destination_path,
-            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
-            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.json'),
             sha256_hexdigest='abc123',
             size=11,
             source_url='https://example.org/alpha.warc.gz',
@@ -893,7 +915,7 @@ class TestProcessCollectionJob(TestCase):
         )
         self.assertEqual(
             saved_state_snapshots[0]['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['warc_path'],
-            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+            '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
         )
         self.assertEqual(
             saved_state_snapshots[0]['files']['ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz']['source_url'],
@@ -967,7 +989,7 @@ class TestProcessCollectionJob(TestCase):
         status_updates = [call.args[3] for call in mock_update_status.call_args_list]
         self.assertEqual(
             status_updates[0].processing_status_detail,
-            'store-time-after 2026-01-30T12:00:00+00:00',
+            '',
         )
         self.assertEqual(mock_save.call_args.args[2]['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
 
@@ -1003,12 +1025,12 @@ class TestProcessCollectionJob(TestCase):
         download_result = MagicMock()
         download_result.success = True
         download_result.bytes_written = 11
-        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.destination_path = Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz')
         fixity_result = FixityResult(
             success=True,
             warc_path=download_result.destination_path,
-            sha256_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.sha256'),
-            json_path=Path('/tmp/storage/collections/123/fixity/2026/03/file.warc.gz.json'),
+            sha256_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.sha256'),
+            json_path=Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz.json'),
             sha256_hexdigest='abc123',
             size=11,
             source_url='https://example.org/reconciliation-alpha.warc.gz',
@@ -1020,7 +1042,7 @@ class TestProcessCollectionJob(TestCase):
             'files': {
                 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz': {
                     'source_url': 'https://example.org/reconciliation-alpha.warc.gz',
-                    'warc_path': '/tmp/storage/collections/123/warcs/2026/03/missing-alpha.warc.gz',
+                    'warc_path': '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/missing-alpha.warc.gz',
                     'status': 'failed',
                 }
             },
@@ -1091,7 +1113,7 @@ class TestProcessCollectionJob(TestCase):
         download_result = MagicMock()
         download_result.success = False
         download_result.bytes_written = 0
-        download_result.destination_path = Path('/tmp/storage/collections/123/warcs/2026/03/file.warc.gz')
+        download_result.destination_path = Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/file.warc.gz')
         download_result.error_message = '502 Bad Gateway'
         saved_state_snapshots: list[dict[str, object]] = []
 
@@ -1128,7 +1150,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(saved_manifest_entry['source_url'], 'https://example.org/alpha.warc.gz')
         self.assertEqual(
             saved_manifest_entry['warc_path'],
-            '/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
+            '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
         )
         self.assertEqual(saved_manifest_entry['discovered_at'], '2026-03-07T15:00:00+00:00')
         self.assertEqual(mock_download.call_count, 1)
@@ -1208,7 +1230,7 @@ class TestRunPlannedDownloads(TestCase):
                 123,
                 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz',
                 'https://example.org/alpha.warc.gz',
-                Path('/tmp/storage/collections/123/warcs/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'),
+                Path('/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz'),
             ),
         )
 
@@ -1349,7 +1371,7 @@ class TestCollectionReportingHelpers(TestCase):
         )
 
         self.assertEqual(result.status_update.processing_status_main, 'discovery-failed')
-        self.assertEqual(result.status_update.processing_status_detail, 'discovery failed after 2 partial records')
+        self.assertEqual(result.status_update.processing_status_detail, '0')
         self.assertEqual(result.summary_update.summary_status_server_path, '/tmp/storage/collections/123')
 
 
