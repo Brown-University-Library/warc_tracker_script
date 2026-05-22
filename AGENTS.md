@@ -8,7 +8,7 @@ If other instruction files exist (Copilot, IDE rules, contributor docs) and conf
 ## Project basics
 
 - Primary language: Python
-- Target runtime: Python 3.12
+- Target runtime: Python 3.12 -- unless a `pyproject.toml` specifies a different version
 - Dependency / execution tool: `uv`
 - Project-root is the directory containing this file (and `.git/`, and `.gitignore`).
 
@@ -28,7 +28,7 @@ If other instruction files exist (Copilot, IDE rules, contributor docs) and conf
 
 ### Type hints and imports
 
-- Use Python 3.12 type hints everywhere (functions and important variables).
+- Use Python 3.12 type hints everywhere (functions and important variables). (Unless a `pyproject.toml` specifies a different version.)
 - Prefer builtin generics (e.g., `list[str]`, `dict[str, int]`) over `typing.List` / `typing.Dict`.
 - Prefer PEP 604 unions (e.g., `str | None`) over `Optional[str]`.
 - Avoid `typing` and `annotations` imports unless strictly necessary.
@@ -40,6 +40,7 @@ If other instruction files exist (Copilot, IDE rules, contributor docs) and conf
   - `if __name__ == '__main__': main()`
 - Keep `main()` simple: parse args / orchestrate calls only.
 - Put real logic into top-level helper functions and modules (no nested function definitions).
+- Rarely use more than three levels of hierarchy: main() can call helper_A() which can call helper(B) which can, if necessary, can call helper(C) -- but that's it.
 
 ### Functions and control flow
 
@@ -97,6 +98,12 @@ If other instruction files exist (Copilot, IDE rules, contributor docs) and conf
   - Django primitives (`HttpRequest`, `HttpResponse`, `render`, `redirect`, etc.)
   - The minimal set of functions/classes from `project/app/lib/` needed for each endpoint
 - Avoid creating a secondary abstraction layer inside `views.py` (no view-helper utilities); place helpers in `project/app/lib/`.
+
+
+## Front-end change guidance
+
+- When front-end changes are required, use JavaScript only where it is truly required.
+- Prefer updates in CSS, Python code, or Django template code when those can satisfy the behavior or presentation need.
 
 
 ## Tests
