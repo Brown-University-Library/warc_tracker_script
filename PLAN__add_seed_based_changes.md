@@ -111,6 +111,8 @@ Implementation plan:
      - place under `UNKNOWN_SEED`.
    - Recommendation: use `UNKNOWN_SEED` for nonstandard/EXTERNAL WARCs and increment/report a warning count, so backup work does not silently skip files.
 
+   FEEDBACK: this "UNKNOWN_SEED" plan is fine. But add a `cron_scripts/check_for_unknown_seeds.py` script to periodically check for files in the `UNKNOWN_SEED` folder and send an email notification to a list from the dotenv file. Let me know what to name the dotenv variable.
+
 5. Update manifest/state handling.
    - Keep manifest keys by filename for now to preserve dedupe behavior.
    - Add `seed_id` to each file entry.
@@ -127,6 +129,8 @@ Implementation plan:
      - regenerates or relocates fixity files,
      - updates `state.json`.
    - Make this idempotent and test it with temporary directories before running on real storage.
+
+   FEEDBACK: don't worry about existing data. This is development -- I'll delete the existing data and start fresh.
 
 7. Update on-disk summary totals.
    - `iter_collection_warc_paths()` currently scans `collections/<id>/warcs/**/*.warc.gz`.
@@ -154,6 +158,8 @@ Recommendation:
 
 - In the first implementation, add code that can compute `observed_seed_count` from discovered records/local state but do not write it to column H until the meaning is confirmed.
 - If the client wants configured seed count, identify and test the correct Archive-It source before wiring column H writes.
+
+FEEDBACK: I don't know what "Seed Count" means. Let's for now assume "Observed WARC seed count" and we can change it later if needed.
 
 ## Spreadsheet implementation plan
 
@@ -224,9 +230,13 @@ Recommendation:
 1. Should seed folders be named `SEED2761639` or just `2761639`?
    - Recommendation: `SEED2761639`, because it is self-describing and matches filenames/schema.
 
+   FEEDBACK: I like the self-describing nature of `SEED2761639`.
+
 2. Where should fixity files live?
    - Next to the WARC files, or in a parallel `fixity/` tree?
    - Recommendation: co-locate unless client/operator expects a separate fixity tree.
+
+   FEEDBACK: co-locating is fine.
 
 3. What should happen to WARC files without a parseable `SEED...` in the filename?
    - Skip, fail the collection, or store under `UNKNOWN_SEED`?
@@ -234,6 +244,8 @@ Recommendation:
 
 4. Should existing downloaded files be moved into the new seed layout?
    - Recommendation: yes, via an idempotent migration/reconciliation step, not by manual moves.
+
+   FEEDBACK: no.
 
 5. What exactly should column H `Seed Count` mean?
    - Configured Archive-It seed total?
@@ -246,16 +258,24 @@ Recommendation:
    - Files successfully downloaded in this run?
    - Recommendation: confirm with client; my default would be latest-run discovered WARC count because the label says `last-fetch-file-count`.
 
+   FEEDBACK: your "latest-run discovered WARC count" suggestion is fine. Document the possibilities, and the choice made.
+
 7. Should status values remain machine-oriented slugs or be made human-readable?
    - Current values are useful for coordination and tests.
    - Recommendation: keep slugs unless client specifically requests display wording changes.
 
+   FEEDBACK: keep slugs.
+
 8. Should the script update struck-through columns at all?
    - Recommendation: no. Treat them as deprecated duplicates and write only the active replacement columns.
+
+   FEEDBACK: no -- struck-through columns should not be updated and will be removed.
 
 9. Should the seed-level worksheet become part of this change?
    - The current request only asked for collection-level seed count and seed-based storage folders.
    - Recommendation: defer seed-level sheet writes unless the client asks for seed-by-seed reporting.
+
+   FEEDBACK: no -- seed-level worksheet will not be part of this change.
 
 ## Acceptance criteria
 
