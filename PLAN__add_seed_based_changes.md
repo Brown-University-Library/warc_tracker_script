@@ -51,12 +51,12 @@ Use these canonical internal fields and sheet aliases going forward:
 | Canonical field | Sheet label | Existing rough equivalent | Meaning |
 | --- | --- | --- | --- |
 | `status_last_fetch` | `status-last-fetch` | `processing_status_main` | Coarse collection status for the latest run/fetch. Reuse existing status values unless stakeholders want wording changes. |
-| `status_last_fetch_file_count` | `status-last-fetch-file-count` | part of `processing_status_detail` | Numeric count for the latest fetch/run. Preferred meaning: number of active download candidates or files processed in the latest run. Needs confirmation. |
+| `status_last_fetch_file_count` | `status-last-fetch-file-count` | part of `processing_status_detail` | Numeric count of WARC files discovered by WASAPI during the latest fetch/run. |
 | `last_download_timestamp` | `last-download-timestamp` | `summary_status_last_wasapi_check` | Timestamp when the script finished its latest processing/reporting pass for that collection. |
 | `total_col_warc_count` | `total-col-WARC-count` | `summary_status_downloaded_warcs_count` | Cumulative on-disk WARC count for the collection. |
 | `total_downloaded_collection_size` | `total-downloaded-collection-size` | `summary_status_downloaded_warcs_size` | Cumulative on-disk WARC size for the collection, formatted as GB/TB. |
 | `server_file_path_collection_level` | `server-file-path-collectionLevel` | `summary_status_server_path` | Local collection root path. |
-| `seed_count` | `Seed Count` | new | Collection-level seed count. Exact source/meaning needs confirmation. |
+| `seed_count` | `Seed Count` | new | Observed WARC seed count: distinct `SEED...` identifiers observed in WASAPI WARC filenames and/or local state. |
 
 Status values can initially remain:
 
@@ -97,21 +97,19 @@ Implementation plan:
    - Update path builders to include `seed_id`.
    - Update tests in `tests/test_storage_layout.py`.
 
-3. Decide and implement where fixity files should be stored.
-   - Option A: store fixity files next to the WARC:
+3. Store fixity files next to the WARC files.
+   - Use this path shape:
      `collections/<collection_id>/<seed_id>/<year>/<month>/<filename>.sha256`
-   - Option B: keep a separate parallel fixity tree:
-     `collections/<collection_id>/fixity/<seed_id>/<year>/<month>/<filename>.sha256`
-   - Recommendation: use Option A unless there is a strong reason to keep fixity files separate. It keeps each seed/year/month folder self-contained and matches the requested operator-facing structure.
+   - This keeps each seed/year/month folder self-contained and matches the requested operator-facing structure.
 
 4. Update download planning.
    - `build_planned_download_paths()` and `build_planned_downloads()` should pass the parsed `seed_id` from the filename into storage planning.
-   - Records without parseable seed ids need a defined policy:
-     - either skip and report as planning failures, or
-     - place under `UNKNOWN_SEED`.
-   - Recommendation: use `UNKNOWN_SEED` for nonstandard/EXTERNAL WARCs and increment/report a warning count, so backup work does not silently skip files.
-
-   FEEDBACK: this "UNKNOWN_SEED" plan is fine. But add a `cron_scripts/check_for_unknown_seeds.py` script to periodically check for files in the `UNKNOWN_SEED` folder and send an email notification to a list from the dotenv file. Let me know what to name the dotenv variable.
+   - Records without parseable seed ids should be placed under `UNKNOWN_SEED` and counted/reported as warnings, so backup work does not silently skip files.
+   - Add `cron_scripts/check_for_unknown_seeds.py` to periodically scan for files under any `UNKNOWN_SEED` folder and send an email notification if any are found.
+   - Use `UNKNOWN_SEED_ALERT_RECIPIENTS` as the dotenv variable for notification recipients.
+   - Treat `UNKNOWN_SEED_ALERT_RECIPIENTS` as JSON containing a list of two-item tuples/lists: `(name, email_address)`.
+   - Example dotenv value:
+     `UNKNOWN_SEED_ALERT_RECIPIENTS='[["Birkin", "birkin@example.edu"], ["Archive Team", "archive-team@example.edu"]]'`
 
 5. Update manifest/state handling.
    - Keep manifest keys by filename for now to preserve dedupe behavior.
@@ -119,23 +117,15 @@ Implementation plan:
    - Store the new `warc_path`, `sha256_path`, and `json_path`.
    - Preserve existing retry and reconciliation logic.
 
-6. Handle already-downloaded files.
-   - Existing state and files may use:
-     `collections/<collection_id>/warcs/<year>/<month>/<filename>`
-   - Decide whether to migrate existing files or only use the new structure for future downloads.
-   - Recommendation: add a small migration/reconciliation step that, for each known downloaded file:
-     - derives the new seed-based path,
-     - if the old file exists and the new file is missing, moves or copies it to the new path,
-     - regenerates or relocates fixity files,
-     - updates `state.json`.
-   - Make this idempotent and test it with temporary directories before running on real storage.
-
-   FEEDBACK: don't worry about existing data. This is development -- I'll delete the existing data and start fresh.
+6. Do not implement old-layout migration.
+   - This is still development data.
+   - Existing downloaded data will be deleted manually and rebuilt from a clean run.
+   - Keep implementation focused on the new layout only.
 
 7. Update on-disk summary totals.
    - `iter_collection_warc_paths()` currently scans `collections/<id>/warcs/**/*.warc.gz`.
    - Change it to scan the new seed tree.
-   - If supporting migration, it may temporarily scan both old and new layouts but avoid double-counting identical filenames.
+   - Do not scan the old `warcs/` layout.
 
 ## Seed count in column H
 
@@ -154,12 +144,12 @@ Important observation:
 - The spreadsheet sample shows collection `11926` with `Seed Count = 83`.
 - Older captured WASAPI metadata for collection `11926` has fewer distinct `SEED...` values when parsed from WARC filenames, so column H may be intended as configured seed count rather than observed downloaded-WARC seed count.
 
-Recommendation:
+Decision for now:
 
-- In the first implementation, add code that can compute `observed_seed_count` from discovered records/local state but do not write it to column H until the meaning is confirmed.
-- If the client wants configured seed count, identify and test the correct Archive-It source before wiring column H writes.
-
-FEEDBACK: I don't know what "Seed Count" means. Let's for now assume "Observed WARC seed count" and we can change it later if needed.
+- Treat `Seed Count` as observed WARC seed count.
+- Compute it as the number of distinct `SEED...` identifiers observed in WASAPI WARC filenames and/or local state.
+- Write this observed count to column H.
+- If the client later clarifies that column H means configured Archive-It seed total, change the implementation to use the correct Archive-It source or another confirmed source.
 
 ## Spreadsheet implementation plan
 
@@ -178,7 +168,7 @@ FEEDBACK: I don't know what "Seed Count" means. Let's for now assume "Observed W
      - `total_col_warc_count: str`
      - `total_downloaded_collection_size: str`
      - `server_file_path_collection_level: str`
-     - optional `seed_count: str`
+     - `seed_count: str`
 
 3. Update write helpers.
    - `build_collection_status_cell_updates()`
@@ -207,82 +197,79 @@ FEEDBACK: I don't know what "Seed Count" means. Let's for now assume "Observed W
 2. **Seed parsing/storage layout slice**
    - Add seed-id extraction and seed-based paths.
    - Update path planning and tests.
-   - Keep spreadsheet writes mostly unchanged.
-   - Tests: storage layout, planned downloads, reconciliation.
+   - Store fixity files next to WARC files.
+   - Add `UNKNOWN_SEED` handling.
+   - Tests: storage layout, planned downloads, unknown seed handling.
 
-3. **State/migration slice**
-   - Decide and implement old-layout handling.
-   - Add migration or dual-layout recognition.
-   - Tests: old state path exists, new path missing; already migrated; unknown seed.
+3. **State and unknown-seed monitoring slice**
+   - Update state paths for the new layout.
+   - Do not implement old-layout migration.
+   - Add `cron_scripts/check_for_unknown_seeds.py`.
+   - Add `UNKNOWN_SEED_ALERT_RECIPIENTS` dotenv support for JSON recipient pairs.
+   - Tests: new state paths, unknown seed scan, recipient parsing.
 
 4. **Seed count slice**
    - Implement `observed_seed_count`.
-   - Decide whether column H should receive observed or configured seed count.
-   - If configured count is required, add Archive-It seed inventory lookup or seed-level sheet integration.
+   - Write observed WARC seed count to column H.
+   - Document that this may change later if the client wants configured Archive-It seed total instead.
 
 5. **End-to-end reporting slice**
    - Update final reporting to the new field set.
    - Run against a small active test row in the copy spreadsheet.
    - Confirm sheet values and on-disk layout with the client before merging changes back to the original spreadsheet.
 
-## Open questions and decision points
+## Decisions and remaining questions
 
-1. Should seed folders be named `SEED2761639` or just `2761639`?
-   - Recommendation: `SEED2761639`, because it is self-describing and matches filenames/schema.
+1. Seed folders should be named `SEED2761639`, not just `2761639`.
+   - This is self-describing and matches filenames/schema.
 
-   FEEDBACK: I like the self-describing nature of `SEED2761639`.
+2. Fixity files should live next to the WARC files.
+   - Do not use a separate parallel `fixity/` tree for this change.
 
-2. Where should fixity files live?
-   - Next to the WARC files, or in a parallel `fixity/` tree?
-   - Recommendation: co-locate unless client/operator expects a separate fixity tree.
+3. WARC files without a parseable `SEED...` in the filename should be stored under `UNKNOWN_SEED`.
+   - Add logging/reporting for the count of files stored there.
+   - Add `cron_scripts/check_for_unknown_seeds.py` to scan for `UNKNOWN_SEED` files periodically and email `UNKNOWN_SEED_ALERT_RECIPIENTS`.
 
-   FEEDBACK: co-locating is fine.
+4. Existing downloaded files should not be migrated.
+   - Existing development data will be deleted manually and rebuilt from a clean run.
 
-3. What should happen to WARC files without a parseable `SEED...` in the filename?
-   - Skip, fail the collection, or store under `UNKNOWN_SEED`?
-   - Recommendation: store under `UNKNOWN_SEED` and report a warning count.
+5. Column H `Seed Count` should mean observed WARC seed count for now.
+   - The other possible meanings are configured Archive-It seed total or distinct seed ids currently represented on disk.
+   - Chosen meaning: distinct `SEED...` identifiers observed in WASAPI WARC filenames and/or local state.
+   - This can be changed later if the client clarifies a different meaning.
 
-4. Should existing downloaded files be moved into the new seed layout?
-   - Recommendation: yes, via an idempotent migration/reconciliation step, not by manual moves.
+6. `status-last-fetch-file-count` should count files discovered by WASAPI in the latest fetch.
+   - Other possibilities considered: files planned for download, or files successfully downloaded in this run.
+   - Chosen meaning: latest-run discovered WARC count, because the label says `last-fetch-file-count`.
 
-   FEEDBACK: no.
+7. Status values should remain machine-oriented slugs.
+   - Keep values such as `downloaded-without-errors` unless the client specifically requests display wording changes.
 
-5. What exactly should column H `Seed Count` mean?
-   - Configured Archive-It seed total?
-   - Distinct seed ids observed in downloaded/discovered WARC records?
-   - Distinct seed ids currently represented on disk?
+8. The script should not update struck-through columns.
+   - Treat them as deprecated duplicates.
+   - They will be removed from the spreadsheet.
 
-6. What should `status-last-fetch-file-count` count?
-   - Files discovered by WASAPI in the latest fetch?
-   - Files planned for download?
-   - Files successfully downloaded in this run?
-   - Recommendation: confirm with client; my default would be latest-run discovered WARC count because the label says `last-fetch-file-count`.
+9. The seed-level worksheet is not part of this change.
+   - The current scope is collection-level seed count and seed-based storage folders.
 
-   FEEDBACK: your "latest-run discovered WARC count" suggestion is fine. Document the possibilities, and the choice made.
+## Deferred questions
 
-7. Should status values remain machine-oriented slugs or be made human-readable?
-   - Current values are useful for coordination and tests.
-   - Recommendation: keep slugs unless client specifically requests display wording changes.
+1. What is the exact email delivery mechanism for `cron_scripts/check_for_unknown_seeds.py`?
+   - Options include a local `sendmail` command, SMTP environment variables, or an existing institutional mail relay.
+   - The recipient list variable should be `UNKNOWN_SEED_ALERT_RECIPIENTS`.
+   - `UNKNOWN_SEED_ALERT_RECIPIENTS` should parse to a list of `(name, email_address)` pairs.
 
-   FEEDBACK: keep slugs.
-
-8. Should the script update struck-through columns at all?
-   - Recommendation: no. Treat them as deprecated duplicates and write only the active replacement columns.
-
-   FEEDBACK: no -- struck-through columns should not be updated and will be removed.
-
-9. Should the seed-level worksheet become part of this change?
-   - The current request only asked for collection-level seed count and seed-based storage folders.
-   - Recommendation: defer seed-level sheet writes unless the client asks for seed-by-seed reporting.
-
-   FEEDBACK: no -- seed-level worksheet will not be part of this change.
+2. Will the client later want `Seed Count` to mean configured Archive-It seed total instead of observed WARC seed count?
+   - For now, the implementation will use observed WARC seed count.
 
 ## Acceptance criteria
 
 - `uv run ./validate_spreadsheet_connection.py` succeeds against the updated copy spreadsheet after alias/reporting changes.
 - Active rows are parsed from the new row-3 headers.
 - Downloaded WARC files are stored under `collections/<collection_id>/<seed_id>/<year>/<month>/`.
-- Fixity file placement is implemented according to the chosen decision.
+- Fixity files are stored next to the WARC files.
+- WARC files without parseable seed ids are stored under `UNKNOWN_SEED`.
+- `cron_scripts/check_for_unknown_seeds.py` scans for `UNKNOWN_SEED` files and emails `UNKNOWN_SEED_ALERT_RECIPIENTS`.
 - Final collection-level reporting writes only active new columns, not struck-through duplicates.
 - The new final report includes:
   - `status-last-fetch`
@@ -291,5 +278,5 @@ FEEDBACK: I don't know what "Seed Count" means. Let's for now assume "Observed W
   - `total-col-WARC-count`
   - `total-downloaded-collection-size`
   - `server-file-path-collectionLevel`
-  - `Seed Count` only after its source/meaning is confirmed.
+  - `Seed Count` as observed WARC seed count.
 - Existing tests are updated and pass with `uv run ./run_tests.py`.
