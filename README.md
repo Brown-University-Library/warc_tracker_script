@@ -2,6 +2,8 @@
 
 on this page...
 - [Overview](#overview)
+- [Installation](#installation)
+- [Usage](#usage)
 - [What the script does](#what-the-script-does)
 - [How it works in practice](#how-it-works-in-practice)
 - [Current state of the project](#current-state-of-the-project)
@@ -18,6 +20,66 @@ This script backs up Archive-It WARC files for collections listed as active in a
 At a high level, it checks which collections are active, asks WASAPI (Archive-It's Web Archiving Systems API) what WARC files are available, downloads anything missing, writes local fixity information, and updates the spreadsheet with collection-level progress.
 
 The local filesystem is treated as the source of truth. The spreadsheet is mainly there to help monitor activity and control which collections are in scope.
+
+## Installation
+
+Clone the repository:
+
+```shell
+cd /path/to/warc_tracker_script_stuff/
+git clone git@github.com:Brown-University-Library/warc_tracker_script.git
+cd warc_tracker_script
+```
+
+Run commands from the project root with `uv`.
+
+Install/sync dependencies:
+
+```shell
+uv sync
+```
+
+Create a `.env` file. Required values for the production script are:
+
+```shell
+GSHEET_CREDENTIALS_JSON='{"type":"service_account", "...":"..."}'
+GSHEET_SPREADSHEET_ID="the-google-sheet-id"
+LOG_PATH="./logs/warc_tracker_script.log"
+ARCHIVEIT_WASAPI_USERNAME="archive-it-username"
+ARCHIVEIT_WASAPI_PASSWORD="archive-it-password"
+```
+
+Optional values:
+
+```shell
+LOG_LEVEL="INFO"
+WARC_STORAGE_ROOT="/path/to/storage"
+ARCHIVEIT_WASAPI_BASE_URL="https://warcs.archive-it.org/wasapi/v1/webdata"
+RUN_COORDINATION_MODE="skip_spreadsheet_coordination_check"
+```
+
+`RUN_COORDINATION_MODE` is normally unset. When it is unset, startup checks active spreadsheet rows and refuses to start if any row already has a blocking in-progress status such as `discovery-in-progress` or `downloading-in-progress`. Set `RUN_COORDINATION_MODE="skip_spreadsheet_coordination_check"` only when an external cron or scheduler lock already guarantees that two copies of the script cannot run at the same time; that setting skips the spreadsheet coordination preflight.
+
+## Usage
+
+Run the backup workflow:
+
+```shell
+uv run ./main.py
+```
+
+Run tests:
+
+```shell
+uv run ./run_tests.py
+uv run ./run_tests.py -v tests.test_orchestration
+```
+
+Capture WASAPI metadata for one collection without downloading WARC files:
+
+```shell
+uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./wasapi_inspection
+```
 
 ## What the script does
 
