@@ -56,7 +56,18 @@ def run_collection_orchestration(
     archive_it_credentials: tuple[str, str],
 ) -> None:
     """
-    Runs the current sequential collection orchestration flow.
+    Runs the current sequential collection orchestration flow. (Concurrent processing may be added in the future.)
+
+    Re the "coordination-mode" references below...
+    - Coordination-mode here means startup coordination for the WARC tracker run.
+    - Normal mode processing:
+        - In normal mode, the RUN_COORDINATION_MODE envar is unset.
+        - At startup, the script checks active Google Sheet rows and refuses to run if any active collection
+        already has a blocking in-progress status, currently:
+            - discovery-in-progress
+            - downloading-in-progress
+        - This prevents two copies of the script from processing/updating the same collection rows at once.
+
     Called by: main()
     """
     sheet_context = load_collection_sheet_context(spreadsheet_id)
