@@ -1,7 +1,7 @@
+import datetime as datetime_module
 import json
 import logging
 import os
-import datetime as datetime_module
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -181,9 +181,7 @@ def parse_dev_collection_ids(configured_collection_ids: str | None) -> list[int]
             for token in stripped_value.replace(',', ' ').split():
                 collection_id: int | None = parse_collection_id(token)
                 if collection_id is None:
-                    raise DevCollectionsConfigurationError(
-                        f'DEV_COLLECTIONS contains an invalid collection id: {token}'
-                    )
+                    raise DevCollectionsConfigurationError(f'DEV_COLLECTIONS contains an invalid collection id: {token}')
                 if collection_id not in seen_collection_ids:
                     parsed_collection_ids.append(collection_id)
                     seen_collection_ids.add(collection_id)
@@ -193,7 +191,7 @@ def parse_dev_collection_ids(configured_collection_ids: str | None) -> list[int]
 
 def get_dev_collection_ids() -> list[int] | None:
     """
-    Returns the optional DEV_COLLECTIONS collection-id filter from the environment.
+    Returns the optional DEV_COLLECTIONS collection-id filter from the envar.
     Called by: run_collection_orchestration()
     """
     result: list[int] | None = parse_dev_collection_ids(os.getenv('DEV_COLLECTIONS'))
@@ -295,8 +293,7 @@ def enforce_startup_run_coordination(
     log.info('Resolved startup coordination mode: %s', coordination_mode or '<unset>')
     if should_skip_spreadsheet_coordination_check(coordination_mode):
         log.info(
-            'Skipping spreadsheet coordination preflight because '
-            'RUN_COORDINATION_MODE=skip_spreadsheet_coordination_check.'
+            'Skipping spreadsheet coordination preflight because RUN_COORDINATION_MODE=skip_spreadsheet_coordination_check.'
         )
         return
     blocking_summary: BlockingCoordinationSummary | None = get_blocking_coordination_summary(
