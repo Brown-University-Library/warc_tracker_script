@@ -16,6 +16,7 @@ from lib.collection_sheet import (
     CollectionSummaryUpdate,
     HeaderLocation,
     get_column_index,
+    parse_collection_id,
     update_collection_final_reporting,
     update_collection_processing_status,
 )
@@ -77,6 +78,12 @@ def format_local_display_timestamp(timestamp_text: str) -> str:
 class RunCoordinationError(RuntimeError):
     """
     Indicates that startup coordination policy refused to begin a run with blocking in-progress spreadsheet statuses.
+    """
+
+
+class DevCollectionsConfigurationError(ValueError):
+    """
+    Indicates that DEV_COLLECTIONS could not be parsed or resolved to active spreadsheet collection rows.
     """
 
 
@@ -157,6 +164,68 @@ def get_run_coordination_mode() -> str | None:
         stripped_mode: str = configured_mode.strip()
         if stripped_mode:
             result = stripped_mode
+    return result
+
+
+def parse_dev_collection_ids(configured_collection_ids: str | None) -> list[int] | None:
+    """
+    Parses the optional DEV_COLLECTIONS setting into unique collection ids while preserving configured order.
+    Called by: get_dev_collection_ids()
+    """
+    result: list[int] | None = None
+    if configured_collection_ids is not None:
+        stripped_value: str = configured_collection_ids.strip()
+        if stripped_value:
+            parsed_collection_ids: list[int] = []
+            seen_collection_ids: set[int] = set()
+            for token in stripped_value.replace(',', ' ').split():
+                collection_id: int | None = parse_collection_id(token)
+                if collection_id is None:
+                    raise DevCollectionsConfigurationError(
+                        f'DEV_COLLECTIONS contains an invalid collection id: {token}'
+                    )
+                if collection_id not in seen_collection_ids:
+                    parsed_collection_ids.append(collection_id)
+                    seen_collection_ids.add(collection_id)
+            result = parsed_collection_ids
+    return result
+
+
+def get_dev_collection_ids() -> list[int] | None:
+    """
+    Returns the optional DEV_COLLECTIONS collection-id filter from the environment.
+    Called by: run_collection_orchestration()
+    """
+    result: list[int] | None = parse_dev_collection_ids(os.getenv('DEV_COLLECTIONS'))
+    return result
+
+
+def resolve_collection_jobs_for_run(
+    active_collection_jobs: list[CollectionJob],
+    requested_collection_ids: list[int] | None,
+) -> list[CollectionJob]:
+    """
+    Resolves DEV_COLLECTIONS ids back to existing CollectionJob objects so spreadsheet row metadata is preserved.
+    Called by: run_collection_orchestration()
+    """
+    result: list[CollectionJob] = active_collection_jobs
+    if requested_collection_ids is not None:
+        collection_jobs_by_id: dict[int, CollectionJob] = {}
+        for collection_job in active_collection_jobs:
+            if collection_job.collection_id not in collection_jobs_by_id:
+                collection_jobs_by_id[collection_job.collection_id] = collection_job
+
+        missing_collection_ids: list[int] = [
+            collection_id for collection_id in requested_collection_ids if collection_id not in collection_jobs_by_id
+        ]
+        if missing_collection_ids:
+            missing_collection_id_display: str = ', '.join(str(collection_id) for collection_id in missing_collection_ids)
+            raise DevCollectionsConfigurationError(
+                'DEV_COLLECTIONS contains collection ids not found among active spreadsheet collection rows: '
+                f'{missing_collection_id_display}'
+            )
+
+        result = [collection_jobs_by_id[collection_id] for collection_id in requested_collection_ids]
     return result
 
 
@@ -1210,7 +1279,6 @@ def process_collection_job(
         len(active_downloads),
     )
     if not active_downloads:
-        discovery_completed_at: str = datetime.now(UTC).isoformat()
         write_collection_no_new_files_status(
             worksheet,
             header_location,

@@ -18,13 +18,16 @@ from lib.orchestration import (
     STATUS_DISCOVERY_FAILED,
     STATUS_SPREADSHEET_UPDATE_FAILED,
     CollectionProcessingReport,
+    DevCollectionsConfigurationError,
     RunCoordinationError,
     build_collection_failure_report,
     enforce_startup_run_coordination,
     get_archive_it_credentials,
+    get_dev_collection_ids,
     get_downloaded_storage_root,
     get_run_coordination_mode,
     process_collection_job,
+    resolve_collection_jobs_for_run,
     write_collection_final_report,
 )
 from lib.wasapi_discovery import DEFAULT_WASAPI_BASE_URL, DiscoveryResult, WasapiDiscoveryError
@@ -79,7 +82,11 @@ def run_collection_orchestration(
     Called by: main()
     """
     sheet_context: CollectionSheetContext = load_collection_sheet_context(spreadsheet_id)
-    collection_jobs: list[CollectionJob] = sheet_context.collection_jobs
+    requested_collection_ids: list[int] | None = get_dev_collection_ids()
+    collection_jobs: list[CollectionJob] = resolve_collection_jobs_for_run(
+        active_collection_jobs=sheet_context.collection_jobs,
+        requested_collection_ids=requested_collection_ids,
+    )
     worksheet: gspread.Worksheet = sheet_context.worksheet
     header_location: HeaderLocation = sheet_context.header_location
     coordination_mode: str | None = get_run_coordination_mode()
@@ -90,6 +97,9 @@ def run_collection_orchestration(
         collection_jobs,
     )
     log.debug('active collections found, ``%s``', collection_jobs)
+    if requested_collection_ids is not None:
+        selected_collection_ids: list[int] = [collection_job.collection_id for collection_job in collection_jobs]
+        log.info('DEV_COLLECTIONS limited this run to collection ids: %s', selected_collection_ids)
 
     timeout: httpx.Timeout = httpx.Timeout(30.0, connect=30.0)
     with httpx.Client(auth=archive_it_credentials, timeout=timeout, follow_redirects=True) as client:
@@ -170,6 +180,8 @@ def main() -> None:
         run_collection_orchestration(spreadsheet_id, downloaded_storage_root, wasapi_base_url, archive_it_credentials)
     except CollectionSheetContractError:
         log.exception('Collection worksheet reporting contract validation failed.')
+    except DevCollectionsConfigurationError:
+        log.exception('DEV_COLLECTIONS configuration is invalid.')
     except RunCoordinationError:
         log.exception('Startup run coordination preflight refused to begin processing.')
     log.info('processing complete')

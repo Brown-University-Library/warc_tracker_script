@@ -27,6 +27,7 @@ from lib.orchestration import (
     STATUS_DOWNLOADING_IN_PROGRESS,
     STATUS_DOWNLOAD_PLANNING_COMPLETE,
     STATUS_NO_NEW_FILES_TO_DOWNLOAD,
+    DevCollectionsConfigurationError,
     PlannedDownload,
     RunCoordinationError,
     build_collection_failure_report,
@@ -43,12 +44,15 @@ from lib.orchestration import (
     format_local_display_timestamp,
     get_archive_it_credentials,
     get_blocking_coordination_summary,
+    get_dev_collection_ids,
     get_download_progress_milestone_update,
     get_downloaded_storage_root,
     get_record_source_url,
     get_run_coordination_mode,
     merge_planned_downloads,
+    parse_dev_collection_ids,
     process_collection_job,
+    resolve_collection_jobs_for_run,
     run_planned_downloads,
     should_skip_spreadsheet_coordination_check,
 )
@@ -117,6 +121,61 @@ class TestRunCoordinationHelpers(TestCase):
             result = get_run_coordination_mode()
 
         self.assertEqual(result, RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK)
+
+    def test_get_dev_collection_ids_returns_none_when_unset_or_blank(self) -> None:
+        """
+        Checks that DEV_COLLECTIONS is optional and blank values are ignored.
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            unset_result = get_dev_collection_ids()
+        with patch.dict(os.environ, {'DEV_COLLECTIONS': '   '}, clear=True):
+            blank_result = get_dev_collection_ids()
+
+        self.assertIsNone(unset_result)
+        self.assertIsNone(blank_result)
+
+    def test_parse_dev_collection_ids_accepts_commas_spaces_and_deduplicates(self) -> None:
+        """
+        Checks that DEV_COLLECTIONS accepts comma and whitespace separators while preserving first-seen order.
+        """
+        result = parse_dev_collection_ids('22900, 15887 22900')
+
+        self.assertEqual(result, [22900, 15887])
+
+    def test_parse_dev_collection_ids_rejects_invalid_tokens(self) -> None:
+        """
+        Checks that invalid DEV_COLLECTIONS entries fail with a clear configuration error.
+        """
+        with self.assertRaises(DevCollectionsConfigurationError) as exc_context:
+            parse_dev_collection_ids('22900,not-an-id')
+
+        self.assertIn('not-an-id', str(exc_context.exception))
+
+    def test_resolve_collection_jobs_for_run_preserves_job_metadata_for_requested_ids(self) -> None:
+        """
+        Checks that requested collection ids resolve back to the active CollectionJob objects from the spreadsheet.
+        """
+        active_collection_jobs = [
+            CollectionJob(22900, 'MS', 'https://example.com/22900', 'Alpha', 4),
+            CollectionJob(15887, 'UA', 'https://example.com/15887', 'Beta', 7),
+        ]
+
+        result = resolve_collection_jobs_for_run(active_collection_jobs, [15887])
+
+        self.assertEqual(result, [active_collection_jobs[1]])
+        self.assertEqual(result[0].row_number, 7)
+
+    def test_resolve_collection_jobs_for_run_rejects_missing_active_ids(self) -> None:
+        """
+        Checks that requested ids must be present among active spreadsheet collection jobs.
+        """
+        active_collection_jobs = [CollectionJob(22900, 'MS', 'https://example.com/22900', 'Alpha', 4)]
+
+        with self.assertRaises(DevCollectionsConfigurationError) as exc_context:
+            resolve_collection_jobs_for_run(active_collection_jobs, [15887])
+
+        self.assertIn('15887', str(exc_context.exception))
+        self.assertIn('active spreadsheet collection rows', str(exc_context.exception))
 
     def test_should_skip_spreadsheet_coordination_check_only_for_exact_skip_mode(self) -> None:
         """

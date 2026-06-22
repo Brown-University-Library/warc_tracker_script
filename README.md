@@ -56,6 +56,7 @@ LOG_LEVEL="INFO"
 WARC_STORAGE_ROOT="/path/to/storage"
 ARCHIVEIT_WASAPI_BASE_URL="https://warcs.archive-it.org/wasapi/v1/webdata"
 RUN_COORDINATION_MODE="skip_spreadsheet_coordination_check"
+DEV_COLLECTIONS="22900,15887"
 UNKNOWN_SEED_ALERT_RECIPIENTS='[["Name One", "name.one@example.edu"], ["Name Two", "name.two@example.edu"]]'
 UNKNOWN_SEED_ALERT_FROM_EMAIL="warc-tracker@example.edu"
 UNKNOWN_SEED_ALERT_SMTP_HOST="localhost"
@@ -63,6 +64,8 @@ UNKNOWN_SEED_ALERT_SMTP_PORT="25"
 ```
 
 `RUN_COORDINATION_MODE` is normally unset. When it is unset, startup checks active spreadsheet rows and refuses to start if any row already has a blocking in-progress status such as `discovery-in-progress` or `downloading-in-progress`. Set `RUN_COORDINATION_MODE="skip_spreadsheet_coordination_check"` only when an external cron or scheduler lock already guarantees that two copies of the script cannot run at the same time; that setting skips the spreadsheet coordination preflight.
+
+`DEV_COLLECTIONS` is optional and intended for local development or dev-server testing. When set, it limits processing to the listed active spreadsheet collection rows while still validating the spreadsheet contract. Values may be comma- or whitespace-separated collection IDs. Requested IDs must already exist as active collection rows so status updates can target the correct spreadsheet rows.
 
 `UNKNOWN_SEED_ALERT_RECIPIENTS` is used by `cron_scripts/check_for_unknown_seeds.py`. It must be JSON that parses to a list of `(name, email_address)` pairs.
 
