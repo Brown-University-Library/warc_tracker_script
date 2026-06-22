@@ -21,9 +21,9 @@ def build_test_suite(targets: list[str], webapp_root: Path) -> unittest.TestSuit
     Builds a test suite from provided targets or via discovery.
     Called by: main()
     """
-    loader = unittest.TestLoader()
+    loader: unittest.TestLoader = unittest.TestLoader()
     if targets:
-        suite = unittest.TestSuite()
+        suite: unittest.TestSuite = unittest.TestSuite()
         for target in targets:
             suite.addTests(loader.loadTestsFromName(target))
     else:
@@ -36,8 +36,8 @@ def run_test_suite(test_suite: unittest.TestSuite, verbosity: int) -> int:
     Runs a test suite and returns the failure count.
     Called by: main()
     """
-    runner = unittest.TextTestRunner(verbosity=verbosity)
-    result = runner.run(test_suite)
+    runner: unittest.TextTestRunner = unittest.TextTestRunner(verbosity=verbosity)
+    result: unittest.TestResult = runner.run(test_suite)
     return len(result.failures) + len(result.errors)
 
 
@@ -50,7 +50,7 @@ def main() -> None:
     Called by: __main__
     """
     ## set up argparser ---------------------------------------------
-    parser = argparse.ArgumentParser(description='Run webapp tests')
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(description='Run webapp tests')
     parser.add_argument(
         '-v',
         '--verbose',
@@ -68,16 +68,16 @@ def main() -> None:
         ),
     )
     ## parse args ---------------------------------------------------
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
     ## Ensure webapp root is importable (adds 'lib/', etc) ------
-    webapp_root = Path(__file__).parent
+    webapp_root: Path = Path(__file__).parent
     sys.path.insert(0, str(webapp_root))
     ## Change working directory to webapp root so relative discovery works
     os.chdir(webapp_root)
-    verbosity = 2 if args.verbose else 1
+    verbosity: int = 2 if args.verbose else 1
     test_labels: list[str] = list(args.targets) if args.targets else []
-    test_suite = build_test_suite(test_labels, webapp_root)
-    failures = run_test_suite(test_suite, verbosity)
+    test_suite: unittest.TestSuite = build_test_suite(test_labels, webapp_root)
+    failures: int = run_test_suite(test_suite, verbosity)
     sys.exit(0 if failures == 0 else 1)
 
 

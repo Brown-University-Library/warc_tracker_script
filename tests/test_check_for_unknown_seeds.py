@@ -19,7 +19,7 @@ class TestParseAlertRecipients(TestCase):
     Test cases for parsing UNKNOWN_SEED alert recipients.
     """
 
-    def test_parses_json_name_email_pairs(self):
+    def test_parses_json_name_email_pairs(self) -> None:
         """
         Checks that JSON list pairs become recipient tuples.
         """
@@ -27,7 +27,7 @@ class TestParseAlertRecipients(TestCase):
 
         self.assertEqual(result, [('Birkin', 'birkin@example.edu'), ('Archive Team', 'team@example.edu')])
 
-    def test_rejects_flat_email_list(self):
+    def test_rejects_flat_email_list(self) -> None:
         """
         Checks that flat email lists are rejected because names are required.
         """
@@ -40,7 +40,7 @@ class TestScanUnknownSeedPaths(TestCase):
     Test cases for finding UNKNOWN_SEED files.
     """
 
-    def test_scans_unknown_seed_warc_files(self):
+    def test_scans_unknown_seed_warc_files(self) -> None:
         """
         Checks that WARC files under UNKNOWN_SEED folders are returned.
         """
@@ -79,7 +79,7 @@ class TestSendUnknownSeedAlert(TestCase):
     Test cases for UNKNOWN_SEED alert email sending.
     """
 
-    def test_sends_message_to_recipient_addresses(self):
+    def test_sends_message_to_recipient_addresses(self) -> None:
         """
         Checks that SMTP receives an alert addressed to parsed recipient emails.
         """

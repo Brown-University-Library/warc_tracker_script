@@ -20,7 +20,7 @@ class TestBuildPartialDownloadPath(TestCase):
     Test cases for partial-download path construction.
     """
 
-    def test_appends_partial_suffix(self):
+    def test_appends_partial_suffix(self) -> None:
         """
         Checks that the partial path appends the `.partial` suffix.
         """
@@ -36,7 +36,7 @@ class TestDownloadToPath(TestCase):
     Test cases for streamed file downloading.
     """
 
-    def test_writes_streamed_bytes_and_atomically_renames_on_success(self):
+    def test_writes_streamed_bytes_and_atomically_renames_on_success(self) -> None:
         """
         Checks that streamed content lands at the final path with no leftover partial file.
         """
@@ -57,7 +57,7 @@ class TestDownloadToPath(TestCase):
             self.assertEqual(destination_path.read_bytes(), b''.join(chunks))
             self.assertFalse(result.partial_path.exists())
 
-    def test_removes_stale_partial_before_retry(self):
+    def test_removes_stale_partial_before_retry(self) -> None:
         """
         Checks that a stale partial file is overwritten by a fresh download attempt.
         """
@@ -80,7 +80,7 @@ class TestDownloadToPath(TestCase):
             self.assertEqual(destination_path.read_bytes(), b'fresh-bytes')
             self.assertFalse(partial_path.exists())
 
-    def test_returns_failure_and_cleans_up_partial_on_http_error(self):
+    def test_returns_failure_and_cleans_up_partial_on_http_error(self) -> None:
         """
         Checks that HTTP failure leaves no misleading completed file behind.
         """
@@ -105,7 +105,7 @@ class TestOrchestrationDownloadConsumption(TestCase):
     Test cases for orchestration consumption of the downloader layer.
     """
 
-    def test_build_planned_downloads_skips_record_without_usable_source_url(self):
+    def test_build_planned_downloads_skips_record_without_usable_source_url(self) -> None:
         """
         Checks that records missing a source URL are skipped cleanly.
         """
@@ -125,7 +125,7 @@ class TestOrchestrationDownloadConsumption(TestCase):
         self.assertEqual(result[0].filename, 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz')
         self.assertEqual(result[0].source_url, 'https://example.org/alpha.warc.gz')
 
-    def test_process_collection_job_invokes_downloader_for_usable_records(self):
+    def test_process_collection_job_invokes_downloader_for_usable_records(self) -> None:
         """
         Checks that sequential orchestration invokes the downloader for records with planned destinations.
         """

@@ -14,7 +14,7 @@ class TestBuildOutputPaths(TestCase):
     Test cases for output path construction.
     """
 
-    def test_builds_timestamped_collection_paths(self):
+    def test_builds_timestamped_collection_paths(self) -> None:
         """
         Checks that output paths include the collection id and UTC timestamp.
         """
@@ -34,7 +34,7 @@ class TestBuildMetadataSummary(TestCase):
     Test cases for WASAPI metadata summarization.
     """
 
-    def test_detects_duplicate_filenames_and_identifier_fields(self):
+    def test_detects_duplicate_filenames_and_identifier_fields(self) -> None:
         """
         Checks that duplicate filenames and identifier-like fields are summarized.
         """
@@ -58,7 +58,7 @@ class TestBuildMetadataSummary(TestCase):
         self.assertEqual(result['identifier_field_names_observed'], ['crawl_id', 'identifier'])
         self.assertEqual(result['flat_layout_assessment'], 'obviously_unsafe')
 
-    def test_detects_filename_anomalies(self):
+    def test_detects_filename_anomalies(self) -> None:
         """
         Checks that suspicious filenames are surfaced in anomaly examples.
         """

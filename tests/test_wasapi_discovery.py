@@ -21,7 +21,7 @@ class FakeResponse:
     Represents a lightweight fake httpx response for tests.
     """
 
-    def __init__(self, url: str, payload: object, status_code: int = 200):
+    def __init__(self, url: str, payload: object, status_code: int = 200) -> None:
         self._payload = payload
         self.status_code = status_code
         self.request = httpx.Request('GET', url)
@@ -46,7 +46,7 @@ class FakeClient:
     Represents a fake client returning pre-seeded page payloads.
     """
 
-    def __init__(self, responses: list[FakeResponse]):
+    def __init__(self, responses: list[FakeResponse]) -> None:
         self.responses = list(responses)
         self.calls: list[dict[str, object]] = []
 
@@ -66,7 +66,7 @@ class TestComputeStoreTimeAfterDatetime(TestCase):
     Test cases for overlap-window boundary computation.
     """
 
-    def test_uses_checkpoint_when_present(self):
+    def test_uses_checkpoint_when_present(self) -> None:
         """
         Checks that the checkpoint value is used as the overlap reference.
         """
@@ -76,7 +76,7 @@ class TestComputeStoreTimeAfterDatetime(TestCase):
 
         self.assertEqual(result, datetime(2026, 1, 21, 15, 30, 0, tzinfo=UTC))
 
-    def test_uses_now_when_checkpoint_missing(self):
+    def test_uses_now_when_checkpoint_missing(self) -> None:
         """
         Checks that now is used when no checkpoint exists.
         """
@@ -92,14 +92,14 @@ class TestExtractRecordStoreTime(TestCase):
     Test cases for record store-time extraction.
     """
 
-    def test_returns_store_time_when_present(self):
+    def test_returns_store_time_when_present(self) -> None:
         """
         Checks that a valid store-time string is returned.
         """
         result = extract_record_store_time({'store-time': '2026-03-01T00:00:00Z'})
         self.assertEqual(result, '2026-03-01T00:00:00Z')
 
-    def test_returns_none_when_missing(self):
+    def test_returns_none_when_missing(self) -> None:
         """
         Checks that missing store-time returns None.
         """
@@ -112,7 +112,7 @@ class TestFetchCollectionDiscovery(TestCase):
     Test cases for paginated WASAPI discovery.
     """
 
-    def test_first_run_without_boundary_omits_store_time_after_param(self):
+    def test_first_run_without_boundary_omits_store_time_after_param(self) -> None:
         """
         Checks that first-run discovery does not send a store-time-after filter.
         """
@@ -142,7 +142,7 @@ class TestFetchCollectionDiscovery(TestCase):
         self.assertIsNone(result.after_datetime)
         self.assertNotIn('store-time-after', client.calls[0]['params'])
 
-    def test_pagination_happy_path(self):
+    def test_pagination_happy_path(self) -> None:
         """
         Checks that multiple pages are combined and max store-time is computed.
         """
@@ -187,7 +187,7 @@ class TestFetchCollectionDiscovery(TestCase):
         self.assertEqual(client.calls[0]['params']['store-time-after'], '2026-01-01T00:00:00Z')
         self.assertEqual(client.calls[0]['params']['page_size'], 50)
 
-    def test_missing_store_time_does_not_break_enumeration(self):
+    def test_missing_store_time_does_not_break_enumeration(self) -> None:
         """
         Checks that records without store-time are tolerated and ignored for checkpoint max.
         """
@@ -218,7 +218,7 @@ class TestFetchCollectionDiscovery(TestCase):
         self.assertEqual(len(result.records), 2)
         self.assertEqual(result.max_observed_store_time, '2026-02-03T09:15:00Z')
 
-    def test_malformed_response_raises_clear_error(self):
+    def test_malformed_response_raises_clear_error(self) -> None:
         """
         Checks that a non-object JSON payload raises a discovery error.
         """

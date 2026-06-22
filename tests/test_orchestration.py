@@ -59,7 +59,7 @@ class TestGetStorageRoot(TestCase):
     Test cases for storage-root configuration.
     """
 
-    def test_uses_env_value_when_present(self):
+    def test_uses_env_value_when_present(self) -> None:
         """
         Checks that the configured storage root comes from the environment.
         """
@@ -74,7 +74,7 @@ class TestGetArchiveItCredentials(TestCase):
     Test cases for Archive-It credential lookup.
     """
 
-    def test_returns_primary_credential_names(self):
+    def test_returns_primary_credential_names(self) -> None:
         """
         Checks that primary WASAPI credential variable names are preferred.
         """
@@ -90,7 +90,7 @@ class TestGetArchiveItCredentials(TestCase):
 
         self.assertEqual(result, ('user-a', 'pass-a'))
 
-    def test_returns_none_when_missing(self):
+    def test_returns_none_when_missing(self) -> None:
         """
         Checks that missing credentials return None.
         """
@@ -105,7 +105,7 @@ class TestRunCoordinationHelpers(TestCase):
     Test cases for startup run coordination helpers.
     """
 
-    def test_get_run_coordination_mode_returns_exact_non_blank_value(self):
+    def test_get_run_coordination_mode_returns_exact_non_blank_value(self) -> None:
         """
         Checks that coordination mode returns the configured non-blank string.
         """
@@ -118,7 +118,7 @@ class TestRunCoordinationHelpers(TestCase):
 
         self.assertEqual(result, RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK)
 
-    def test_should_skip_spreadsheet_coordination_check_only_for_exact_skip_mode(self):
+    def test_should_skip_spreadsheet_coordination_check_only_for_exact_skip_mode(self) -> None:
         """
         Checks that only the exact skip mode skips spreadsheet coordination preflight.
         """
@@ -128,7 +128,7 @@ class TestRunCoordinationHelpers(TestCase):
         self.assertFalse(should_skip_spreadsheet_coordination_check('manual'))
         self.assertFalse(should_skip_spreadsheet_coordination_check(None))
 
-    def test_get_blocking_coordination_summary_returns_none_for_blank_and_unknown_statuses(self):
+    def test_get_blocking_coordination_summary_returns_none_for_blank_and_unknown_statuses(self) -> None:
         """
         Checks that blank and unrecognized spreadsheet statuses do not block startup.
         """
@@ -153,7 +153,7 @@ class TestRunCoordinationHelpers(TestCase):
 
         self.assertIsNone(result)
 
-    def test_enforce_startup_run_coordination_blocks_active_status_without_skip_mode(self):
+    def test_enforce_startup_run_coordination_blocks_active_status_without_skip_mode(self) -> None:
         """
         Checks that a run is refused when an active in-progress spreadsheet status is present without skip mode.
         """
@@ -181,7 +181,7 @@ class TestRunCoordinationHelpers(TestCase):
         self.assertIn(STATUS_DISCOVERY_IN_PROGRESS, str(exc_context.exception))
         self.assertIn('123', str(exc_context.exception))
 
-    def test_enforce_startup_run_coordination_skips_blocking_check_for_skip_mode(self):
+    def test_enforce_startup_run_coordination_skips_blocking_check_for_skip_mode(self) -> None:
         """
         Checks that skip mode bypasses spreadsheet blocking statuses.
         """
@@ -213,7 +213,7 @@ class TestDisplayTimestampFormatting(TestCase):
     Test cases for spreadsheet display timestamp formatting.
     """
 
-    def test_format_local_display_timestamp_uses_seconds_precision(self):
+    def test_format_local_display_timestamp_uses_seconds_precision(self) -> None:
         """
         Checks that spreadsheet display timestamps drop sub-second precision.
         """
@@ -228,7 +228,7 @@ class TestCountPendingDownloadCandidates(TestCase):
     Test cases for pending-download counting.
     """
 
-    def test_counts_only_non_downloaded_filename_records(self):
+    def test_counts_only_non_downloaded_filename_records(self) -> None:
         """
         Checks that only filename-bearing records without downloaded status are counted.
         """
@@ -255,7 +255,7 @@ class TestCountDiscoveredWarcFilenameRecords(TestCase):
     Test cases for latest-fetch file-count reporting.
     """
 
-    def test_counts_only_records_with_usable_filenames(self):
+    def test_counts_only_records_with_usable_filenames(self) -> None:
         """
         Checks that latest-fetch file count ignores records without usable filenames.
         """
@@ -276,7 +276,7 @@ class TestBuildPlannedDownloadPaths(TestCase):
     Test cases for planned local destination-path building.
     """
 
-    def test_builds_paths_for_records_with_usable_filenames(self):
+    def test_builds_paths_for_records_with_usable_filenames(self) -> None:
         """
         Checks that filename-bearing records become planned WARC and fixity destinations.
         """
@@ -297,7 +297,7 @@ class TestBuildPlannedDownloadPaths(TestCase):
             )
         )
 
-    def test_skips_records_with_invalid_filenames(self):
+    def test_skips_records_with_invalid_filenames(self) -> None:
         """
         Checks that invalid filenames are skipped instead of breaking orchestration.
         """
@@ -317,7 +317,7 @@ class TestDownloadPlanningHelpers(TestCase):
     Test cases for source-url extraction and download planning.
     """
 
-    def test_get_record_source_url_prefers_locations(self):
+    def test_get_record_source_url_prefers_locations(self) -> None:
         """
         Checks that source-url extraction uses the first usable locations entry.
         """
@@ -331,7 +331,7 @@ class TestDownloadPlanningHelpers(TestCase):
 
         self.assertEqual(result, 'https://example.org/alpha.warc.gz')
 
-    def test_build_planned_downloads_skips_records_without_source_url(self):
+    def test_build_planned_downloads_skips_records_without_source_url(self) -> None:
         """
         Checks that only records with both filename and usable source URL become planned downloads.
         """
@@ -351,7 +351,7 @@ class TestDownloadPlanningHelpers(TestCase):
         self.assertEqual(result[0].filename, 'ARCHIVEIT-123-20260306123456-00000-alpha.warc.gz')
         self.assertEqual(result[0].source_url, 'https://example.org/alpha.warc.gz')
 
-    def test_build_reconciliation_retry_downloads_includes_missing_local_warc(self):
+    def test_build_reconciliation_retry_downloads_includes_missing_local_warc(self) -> None:
         """
         Checks that a manifest entry with a missing local WARC and usable source URL becomes a retry candidate.
         """
@@ -375,7 +375,7 @@ class TestDownloadPlanningHelpers(TestCase):
             )
         )
 
-    def test_merge_planned_downloads_prefers_discovery_candidate_for_duplicate_filename(self):
+    def test_merge_planned_downloads_prefers_discovery_candidate_for_duplicate_filename(self) -> None:
         """
         Checks that discovery planning wins when the same filename appears in both candidate sources.
         """
@@ -396,7 +396,7 @@ class TestDownloadPlanningHelpers(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].source_url, 'https://example.org/discovery-alpha.warc.gz')
 
-    def test_build_evaluated_active_downloads_keeps_missing_warc_and_excludes_complete_file(self):
+    def test_build_evaluated_active_downloads_keeps_missing_warc_and_excludes_complete_file(self) -> None:
         """
         Checks that evaluation keeps a missing WARC active and excludes an already-complete local file.
         """
@@ -453,7 +453,7 @@ class TestDownloadPlanningHelpers(TestCase):
         self.assertEqual(reason_counts['missing_warc'], 1)
         self.assertEqual(reason_counts['already_complete'], 1)
 
-    def test_build_evaluated_active_downloads_keeps_missing_fixity_and_size_mismatch(self):
+    def test_build_evaluated_active_downloads_keeps_missing_fixity_and_size_mismatch(self) -> None:
         """
         Checks that evaluation keeps candidates active for missing fixity and size mismatch conditions.
         """
@@ -496,7 +496,7 @@ class TestDownloadPlanningHelpers(TestCase):
         self.assertEqual(reason_counts['missing_fixity'], 1)
         self.assertEqual(reason_counts['size_mismatch'], 1)
 
-    def test_build_evaluated_active_downloads_keeps_retry_after_prior_failure(self):
+    def test_build_evaluated_active_downloads_keeps_retry_after_prior_failure(self) -> None:
         """
         Checks that evaluation keeps a prior failed manifest entry active even when local artifacts are otherwise complete.
         """
@@ -549,7 +549,7 @@ class TestProcessCollectionJob(TestCase):
     Test cases for per-collection orchestration.
     """
 
-    def test_determine_collection_discovery_mode_uses_full_backfill_without_checkpoint(self):
+    def test_determine_collection_discovery_mode_uses_full_backfill_without_checkpoint(self) -> None:
         """
         Checks that a missing checkpoint selects first-run full backfill mode.
         """
@@ -560,7 +560,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(discovery_mode, DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN)
         self.assertIsNone(after_datetime)
 
-    def test_determine_collection_discovery_mode_uses_overlap_window_with_checkpoint(self):
+    def test_determine_collection_discovery_mode_uses_overlap_window_with_checkpoint(self) -> None:
         """
         Checks that a checkpoint selects incremental overlap-window mode.
         """
@@ -571,7 +571,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(discovery_mode, DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW)
         self.assertEqual(after_datetime, datetime(2026, 1, 30, 12, 0, 0, tzinfo=UTC))
 
-    def test_updates_checkpoint_when_discovery_succeeds(self):
+    def test_updates_checkpoint_when_discovery_succeeds(self) -> None:
         """
         Checks that successful discovery persists the updated checkpoint.
         """
@@ -685,7 +685,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
-    def test_zero_planned_downloads_write_planning_then_no_new_files_statuses(self):
+    def test_zero_planned_downloads_write_planning_then_no_new_files_statuses(self) -> None:
         """
         Checks that zero planned downloads write planning-complete and no-new-files intermediate statuses.
         """
@@ -758,7 +758,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '0')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
-    def test_planned_downloads_persisted_before_download_attempts(self):
+    def test_planned_downloads_persisted_before_download_attempts(self) -> None:
         """
         Checks that planned downloads are persisted before the sequential download loop begins.
         """
@@ -860,7 +860,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_log_summary.call_args.args[2], 1)
         self.assertEqual(mock_log_summary.call_args.args[4], [fixity_result])
 
-    def test_skips_checkpoint_save_when_discovery_not_complete(self):
+    def test_skips_checkpoint_save_when_discovery_not_complete(self) -> None:
         """
         Checks that incomplete discovery does not persist a new checkpoint.
         """
@@ -960,7 +960,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_log_summary.call_args.args[3], [download_result])
         self.assertEqual(mock_log_summary.call_args.args[4], [fixity_result])
 
-    def test_checkpointed_run_uses_overlap_window_boundary_for_discovery(self):
+    def test_checkpointed_run_uses_overlap_window_boundary_for_discovery(self) -> None:
         """
         Checks that a checkpointed collection uses the overlap-window boundary.
         """
@@ -1024,7 +1024,7 @@ class TestProcessCollectionJob(TestCase):
         )
         self.assertEqual(mock_save.call_args.args[2]['enumeration_checkpoint_store_time_max'], '2026-03-06T12:00:00Z')
 
-    def test_reconciliation_only_missing_file_flows_into_sequential_downloads(self):
+    def test_reconciliation_only_missing_file_flows_into_sequential_downloads(self) -> None:
         """
         Checks that a reconciliation-only missing file is passed into the existing sequential download flow.
         """
@@ -1107,7 +1107,7 @@ class TestProcessCollectionJob(TestCase):
         self.assertEqual(mock_log_summary.call_args.args[2], 1)
         self.assertEqual(result.status_update.processing_status_main, STATUS_DOWNLOADED_WITHOUT_ERRORS)
 
-    def test_persists_discovery_planned_files_before_download_attempts_begin(self):
+    def test_persists_discovery_planned_files_before_download_attempts_begin(self) -> None:
         """
         Checks that planned downloads are written to local state before the downloader is invoked.
         """
@@ -1192,7 +1192,7 @@ class TestRunPlannedDownloads(TestCase):
     Test cases for the sequential planned-download loop.
     """
 
-    def test_download_progress_helper_formats_expected_milestone_text(self):
+    def test_download_progress_helper_formats_expected_milestone_text(self) -> None:
         """
         Checks that progress-detail text uses the expected compact milestone format.
         """
@@ -1200,7 +1200,7 @@ class TestRunPlannedDownloads(TestCase):
 
         self.assertEqual(result, '40% (6/15 files)')
 
-    def test_download_progress_helper_emits_only_new_milestones(self):
+    def test_download_progress_helper_emits_only_new_milestones(self) -> None:
         """
         Checks that milestone updates are emitted only when a new progress bucket is reached.
         """
@@ -1220,7 +1220,7 @@ class TestRunPlannedDownloads(TestCase):
         self.assertEqual(last_reported_percent, 40)
         self.assertEqual(progress_detail, '40% (6/15 files)')
 
-    def test_logs_debug_message_immediately_before_download_attempt(self):
+    def test_logs_debug_message_immediately_before_download_attempt(self) -> None:
         """
         Checks that a debug log entry is emitted before a planned download begins.
         """
@@ -1265,7 +1265,7 @@ class TestRunPlannedDownloads(TestCase):
             ),
         )
 
-    def test_progress_callback_emits_only_coarse_download_milestones(self):
+    def test_progress_callback_emits_only_coarse_download_milestones(self) -> None:
         """
         Checks that the sequential download loop emits only coarse milestone progress updates.
         """
@@ -1318,7 +1318,7 @@ class TestCollectionReportingHelpers(TestCase):
     Test cases for final spreadsheet reporting helper payloads.
     """
 
-    def test_build_collection_final_report_uses_on_disk_collection_totals(self):
+    def test_build_collection_final_report_uses_on_disk_collection_totals(self) -> None:
         """
         Checks that final summary fields report cumulative on-disk totals, not only current-run successes.
         """
@@ -1348,7 +1348,7 @@ class TestCollectionReportingHelpers(TestCase):
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '3')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '3.0 GB')
 
-    def test_build_collection_final_report_no_new_downloads_still_reports_on_disk_totals(self):
+    def test_build_collection_final_report_no_new_downloads_still_reports_on_disk_totals(self) -> None:
         """
         Checks that no-op collections still report existing downloaded totals from disk.
         """
@@ -1379,7 +1379,7 @@ class TestCollectionReportingHelpers(TestCase):
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_count, '2')
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '2.0 GB')
 
-    def test_build_collection_final_report_for_file_failures(self):
+    def test_build_collection_final_report_for_file_failures(self) -> None:
         """
         Checks that file failures map to the expected final collection status.
         """
@@ -1404,7 +1404,7 @@ class TestCollectionReportingHelpers(TestCase):
         )
         self.assertEqual(result.summary_update.summary_status_downloaded_warcs_size, '0.0 GB')
 
-    def test_build_collection_failure_report_for_discovery_failure(self):
+    def test_build_collection_failure_report_for_discovery_failure(self) -> None:
         """
         Checks that discovery failure helper builds a clear final reporting payload.
         """

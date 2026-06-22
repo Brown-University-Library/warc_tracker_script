@@ -20,7 +20,7 @@ from lib.collection_sheet import (
     update_collection_processing_status,
 )
 from lib.downloader import DownloadResult, download_to_path
-from lib.fixity import FixityResult, validate_fixity_sidecars, write_fixity_sidecars
+from lib.fixity import FixityResult, FixityValidationResult, validate_fixity_sidecars, write_fixity_sidecars
 from lib.local_state import (
     load_collection_state,
     save_collection_state,
@@ -35,32 +35,32 @@ from lib.storage_layout import (
     extract_warc_seed_id,
     plan_collection_paths,
 )
-from lib.wasapi_discovery import compute_store_time_after_datetime, fetch_collection_discovery
+from lib.wasapi_discovery import DiscoveryResult, compute_store_time_after_datetime, fetch_collection_discovery
 
 DEFAULT_STORAGE_ROOT: Path = Path(__file__).resolve().parent.parent / 'storage'
 
-log = logging.getLogger(__name__)
+log: logging.Logger = logging.getLogger(__name__)
 
-STATUS_DISCOVERY_IN_PROGRESS = 'discovery-in-progress'
-STATUS_DOWNLOAD_PLANNING_COMPLETE = 'download-planning-complete'
-STATUS_DOWNLOADING_IN_PROGRESS = 'downloading-in-progress'
-STATUS_NO_NEW_FILES_TO_DOWNLOAD = 'no-new-files-to-download'
-STATUS_DOWNLOADED_WITHOUT_ERRORS = 'downloaded-without-errors'
-STATUS_COMPLETED_WITH_SOME_FILE_FAILURES = 'completed-with-some-file-failures'
-STATUS_DISCOVERY_FAILED = 'discovery-failed'
-STATUS_SPREADSHEET_UPDATE_FAILED = 'spreadsheet-update-failed'
-DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN = 'full-backfill-first-run'
-DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW = 'incremental-overlap-window'
+STATUS_DISCOVERY_IN_PROGRESS: str = 'discovery-in-progress'
+STATUS_DOWNLOAD_PLANNING_COMPLETE: str = 'download-planning-complete'
+STATUS_DOWNLOADING_IN_PROGRESS: str = 'downloading-in-progress'
+STATUS_NO_NEW_FILES_TO_DOWNLOAD: str = 'no-new-files-to-download'
+STATUS_DOWNLOADED_WITHOUT_ERRORS: str = 'downloaded-without-errors'
+STATUS_COMPLETED_WITH_SOME_FILE_FAILURES: str = 'completed-with-some-file-failures'
+STATUS_DISCOVERY_FAILED: str = 'discovery-failed'
+STATUS_SPREADSHEET_UPDATE_FAILED: str = 'spreadsheet-update-failed'
+DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN: str = 'full-backfill-first-run'
+DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW: str = 'incremental-overlap-window'
 
-RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK = 'skip_spreadsheet_coordination_check'
-BLOCKING_COORDINATION_STATUSES = frozenset(
+RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK: str = 'skip_spreadsheet_coordination_check'
+BLOCKING_COORDINATION_STATUSES: frozenset[str] = frozenset(
     (
         STATUS_DISCOVERY_IN_PROGRESS,
         STATUS_DOWNLOADING_IN_PROGRESS,
     )
 )
 
-DOWNLOAD_PROGRESS_MILESTONES = (20, 40, 60, 80)
+DOWNLOAD_PROGRESS_MILESTONES: tuple[int, ...] = (20, 40, 60, 80)
 
 
 def format_local_display_timestamp(timestamp_text: str) -> str:
@@ -68,9 +68,9 @@ def format_local_display_timestamp(timestamp_text: str) -> str:
     Formats an ISO timestamp in the machine's local timezone to second precision.
     Called by: build_collection_summary_update()
     """
-    normalized_timestamp = timestamp_text.replace('Z', '+00:00')
-    parsed_timestamp = datetime_module.datetime.fromisoformat(normalized_timestamp)
-    result = parsed_timestamp.astimezone().isoformat(timespec='seconds')
+    normalized_timestamp: str = timestamp_text.replace('Z', '+00:00')
+    parsed_timestamp: datetime = datetime_module.datetime.fromisoformat(normalized_timestamp)
+    result: str = parsed_timestamp.astimezone().isoformat(timespec='seconds')
     return result
 
 
@@ -95,8 +95,8 @@ def format_downloaded_size_gb(size_bytes: int) -> str:
     Formats a byte count as gigabytes rounded to one decimal place.
     Called by: build_collection_summary_update()
     """
-    size_gb = size_bytes / (1024**3)
-    result = f'{size_gb:.1f} GB'
+    size_gb: float = size_bytes / (1024**3)
+    result: str = f'{size_gb:.1f} GB'
     return result
 
 
@@ -126,8 +126,8 @@ def get_downloaded_storage_root() -> Path:
     Returns the configured local storage root.
     Called by: process_collection_job()
     """
-    configured_storage_root = os.getenv('WARC_STORAGE_ROOT')
-    result = DEFAULT_STORAGE_ROOT
+    configured_storage_root: str | None = os.getenv('WARC_STORAGE_ROOT')
+    result: Path = DEFAULT_STORAGE_ROOT
     if configured_storage_root:
         result = Path(configured_storage_root).expanduser()
     return result
@@ -138,8 +138,8 @@ def get_archive_it_credentials() -> tuple[str, str] | None:
     Returns Archive-It credentials from the environment when available.
     Called by: process_collection_job()
     """
-    username = os.getenv('ARCHIVEIT_WASAPI_USERNAME') or os.getenv('ARCHIVEIT_USER')
-    password = os.getenv('ARCHIVEIT_WASAPI_PASSWORD') or os.getenv('ARCHIVEIT_PASS')
+    username: str | None = os.getenv('ARCHIVEIT_WASAPI_USERNAME') or os.getenv('ARCHIVEIT_USER')
+    password: str | None = os.getenv('ARCHIVEIT_WASAPI_PASSWORD') or os.getenv('ARCHIVEIT_PASS')
     result: tuple[str, str] | None = None
     if username and password:
         result = (username, password)
@@ -151,10 +151,10 @@ def get_run_coordination_mode() -> str | None:
     Returns the configured startup coordination mode when present.
     Called by: run_collection_orchestration()
     """
-    configured_mode = os.getenv('RUN_COORDINATION_MODE')
+    configured_mode: str | None = os.getenv('RUN_COORDINATION_MODE')
     result: str | None = None
     if configured_mode is not None:
-        stripped_mode = configured_mode.strip()
+        stripped_mode: str = configured_mode.strip()
         if stripped_mode:
             result = stripped_mode
     return result
@@ -165,7 +165,7 @@ def should_skip_spreadsheet_coordination_check(coordination_mode: str | None) ->
     Returns whether startup spreadsheet coordination preflight should be skipped.
     Called by: enforce_startup_run_coordination()
     """
-    result = coordination_mode == RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK
+    result: bool = coordination_mode == RUN_COORDINATION_MODE_SKIP_SPREADSHEET_COORDINATION_CHECK
     return result
 
 
@@ -180,19 +180,21 @@ def get_blocking_coordination_summary(
     """
     blocking_collection_ids: list[int] = []
     blocking_statuses: set[str] = set()
-    status_column_index = get_column_index(header_location, 'status_last_fetch')
-    collection_jobs_by_row = {collection_job.row_number: collection_job for collection_job in collection_jobs}
+    status_column_index: int = get_column_index(header_location, 'status_last_fetch')
+    collection_jobs_by_row: dict[int, CollectionJob] = {
+        collection_job.row_number: collection_job for collection_job in collection_jobs
+    }
     for row_number, collection_job in collection_jobs_by_row.items():
-        row_index = row_number - 1
+        row_index: int = row_number - 1
         if row_index < 0 or row_index >= len(values):
             continue
-        row = values[row_index]
-        status_value = ''
+        row: list[str] = values[row_index]
+        status_value: str = ''
         if status_column_index < len(row):
             status_value = row[status_column_index].strip()
         if not status_value:
             continue
-        normalized_status = status_value.casefold()
+        normalized_status: str = status_value.casefold()
         if normalized_status in BLOCKING_COORDINATION_STATUSES:
             blocking_collection_ids.append(collection_job.collection_id)
             blocking_statuses.add(normalized_status)
@@ -228,7 +230,11 @@ def enforce_startup_run_coordination(
             'RUN_COORDINATION_MODE=skip_spreadsheet_coordination_check.'
         )
         return
-    blocking_summary = get_blocking_coordination_summary(values, header_location, collection_jobs)
+    blocking_summary: BlockingCoordinationSummary | None = get_blocking_coordination_summary(
+        values,
+        header_location,
+        collection_jobs,
+    )
     if blocking_summary is None:
         log.info('Spreadsheet coordination preflight found no blocking in-progress statuses.')
         return
@@ -237,10 +243,10 @@ def enforce_startup_run_coordination(
         len(blocking_summary.blocking_collection_ids),
         blocking_summary.blocking_statuses,
     )
-    blocking_collection_id_display = ', '.join(
+    blocking_collection_id_display: str = ', '.join(
         str(collection_id) for collection_id in blocking_summary.blocking_collection_ids
     )
-    blocking_status_display = ', '.join(blocking_summary.blocking_statuses)
+    blocking_status_display: str = ', '.join(blocking_summary.blocking_statuses)
     raise RunCoordinationError(
         'Runs must not start when spreadsheet in-progress statuses are present unless '
         'RUN_COORDINATION_MODE=skip_spreadsheet_coordination_check. '
@@ -254,17 +260,17 @@ def count_pending_download_candidates(discovered_records: list[dict[str, object]
     Counts discovered records that do not yet have a downloaded status in local state.
     Called by: process_collection_job()
     """
-    files_state = state.get('files')
-    known_files = files_state if isinstance(files_state, dict) else {}
-    pending_count = 0
+    files_state: object = state.get('files')
+    known_files: dict[object, object] = files_state if isinstance(files_state, dict) else {}
+    pending_count: int = 0
     for record in discovered_records:
-        filename_value = record.get('filename')
+        filename_value: object = record.get('filename')
         if not isinstance(filename_value, str) or not filename_value.strip():
             continue
-        file_state = known_files.get(filename_value)
+        file_state: object = known_files.get(filename_value)
         if not isinstance(file_state, dict) or file_state.get('status') != 'downloaded':
             pending_count += 1
-    result = pending_count
+    result: int = pending_count
     return result
 
 
@@ -273,9 +279,9 @@ def count_discovered_warc_filename_records(discovered_records: list[dict[str, ob
     Counts discovered records that have a usable WARC filename.
     Called by: process_collection_job()
     """
-    result = 0
+    result: int = 0
     for record in discovered_records:
-        filename_value = record.get('filename')
+        filename_value: object = record.get('filename')
         if isinstance(filename_value, str) and filename_value.strip():
             result += 1
     return result
@@ -292,7 +298,7 @@ def build_planned_download_paths(
     """
     planned_paths: list[PlannedCollectionPaths] = []
     for record in discovered_records:
-        filename_value = record.get('filename')
+        filename_value: object = record.get('filename')
         if not isinstance(filename_value, str) or not filename_value.strip():
             continue
         try:
@@ -303,7 +309,7 @@ def build_planned_download_paths(
                 collection_id,
                 filename_value,
             )
-    result = planned_paths
+    result: list[PlannedCollectionPaths] = planned_paths
     return result
 
 
@@ -313,12 +319,12 @@ def get_record_source_url(record: dict[str, object]) -> str | None:
     Called by: build_planned_downloads()
     """
     url_candidates: list[object] = []
-    locations_value = record.get('locations')
+    locations_value: object = record.get('locations')
     if isinstance(locations_value, list):
         url_candidates.extend(locations_value)
 
     for field_name in ('location', 'url'):
-        field_value = record.get(field_name)
+        field_value: object = record.get(field_name)
         if field_value is not None:
             url_candidates.append(field_value)
 
@@ -341,11 +347,11 @@ def build_planned_downloads(
     """
     result: list[PlannedDownload] = []
     for record in discovered_records:
-        filename_value = record.get('filename')
+        filename_value: object = record.get('filename')
         if not isinstance(filename_value, str) or not filename_value.strip():
             continue
 
-        source_url = get_record_source_url(record)
+        source_url: str | None = get_record_source_url(record)
         if source_url is None:
             log.info(
                 'Collection %s skipping record %s because no usable source URL was present.',
@@ -355,7 +361,7 @@ def build_planned_downloads(
             continue
 
         try:
-            planned_paths = plan_collection_paths(storage_root, collection_id, filename_value)
+            planned_paths: PlannedCollectionPaths = plan_collection_paths(storage_root, collection_id, filename_value)
         except StorageLayoutError:
             log.exception(
                 'Collection %s record filename could not be mapped to the local storage layout: %s',
@@ -384,16 +390,16 @@ def build_reconciliation_retry_downloads(
     Called by: process_collection_job()
     """
     result: list[PlannedDownload] = []
-    files_value = state.get('files')
-    files_state = files_value if isinstance(files_value, dict) else {}
+    files_value: object = state.get('files')
+    files_state: dict[object, object] = files_value if isinstance(files_value, dict) else {}
     for filename_key, entry_value in files_state.items():
         if not isinstance(filename_key, str) or not filename_key.strip():
             continue
         if not isinstance(entry_value, dict):
             continue
 
-        source_url_value = entry_value.get('source_url')
-        warc_path_value = entry_value.get('warc_path')
+        source_url_value: object = entry_value.get('source_url')
+        warc_path_value: object = entry_value.get('warc_path')
         if not isinstance(source_url_value, str) or not source_url_value.strip():
             continue
         if not isinstance(warc_path_value, str) or not warc_path_value.strip():
@@ -402,7 +408,7 @@ def build_reconciliation_retry_downloads(
             continue
 
         try:
-            planned_paths = plan_collection_paths(storage_root, collection_id, filename_key)
+            planned_paths: PlannedCollectionPaths = plan_collection_paths(storage_root, collection_id, filename_key)
         except StorageLayoutError:
             log.exception(
                 'Collection %s manifest filename could not be mapped to the local storage layout: %s',
@@ -434,7 +440,7 @@ def merge_planned_downloads(
         merged_by_filename[planned_download.filename] = planned_download
     for planned_download in discovery_downloads:
         merged_by_filename[planned_download.filename] = planned_download
-    result = list(merged_by_filename.values())
+    result: list[PlannedDownload] = list(merged_by_filename.values())
     return result
 
 
@@ -527,7 +533,7 @@ def build_collection_status_update(
     Builds a collection-level processing status payload.
     Called by: write_collection_start_status()
     """
-    result = CollectionProcessingStatusUpdate(
+    result: CollectionProcessingStatusUpdate = CollectionProcessingStatusUpdate(
         status_last_fetch=status_last_fetch,
         status_detail=status_detail,
         status_last_fetch_file_count=str(status_last_fetch_file_count),
@@ -553,7 +559,7 @@ def build_download_planning_status(discovered_warc_count: int) -> CollectionProc
     Builds the collection-level status update written after download planning completes.
     Called by: write_collection_download_planning_status()
     """
-    result = build_collection_status_update(
+    result: CollectionProcessingStatusUpdate = build_collection_status_update(
         STATUS_DOWNLOAD_PLANNING_COMPLETE,
         'download planning complete',
         discovered_warc_count,
@@ -566,7 +572,7 @@ def build_no_new_files_status(discovered_warc_count: int) -> CollectionProcessin
     Builds the collection-level status update written when no downloads are needed.
     Called by: write_collection_no_new_files_status()
     """
-    result = build_collection_status_update(
+    result: CollectionProcessingStatusUpdate = build_collection_status_update(
         STATUS_NO_NEW_FILES_TO_DOWNLOAD,
         'no new files to download',
         discovered_warc_count,
@@ -582,7 +588,7 @@ def build_download_start_status(
     Builds the initial collection-level download-in-progress status update.
     Called by: write_collection_download_start_status()
     """
-    result = build_collection_status_update(
+    result: CollectionProcessingStatusUpdate = build_collection_status_update(
         STATUS_DOWNLOADING_IN_PROGRESS,
         build_download_progress_detail(0, 0, planned_download_count),
         discovered_warc_count,
@@ -595,7 +601,7 @@ def build_download_progress_detail(percent_complete: int, completed_count: int, 
     Builds compact progress-detail text for one download milestone.
     Called by: get_download_progress_milestone_update()
     """
-    result = f'{percent_complete}% ({completed_count}/{total_count} files)'
+    result: str = f'{percent_complete}% ({completed_count}/{total_count} files)'
     return result
 
 
@@ -608,10 +614,10 @@ def get_download_progress_milestone_update(
     Returns the next coarse progress milestone text, if a new milestone has been reached.
     Called by: run_planned_downloads()
     """
-    next_reported_percent = last_reported_percent
+    next_reported_percent: int = last_reported_percent
     progress_detail: str | None = None
     if total_count > 0 and completed_count < total_count:
-        percent_complete = (completed_count * 100) // total_count
+        percent_complete: int = (completed_count * 100) // total_count
         for milestone_percent in DOWNLOAD_PROGRESS_MILESTONES:
             if percent_complete >= milestone_percent and milestone_percent > last_reported_percent:
                 next_reported_percent = milestone_percent
@@ -620,7 +626,7 @@ def get_download_progress_milestone_update(
                     completed_count,
                     total_count,
                 )
-    result = (next_reported_percent, progress_detail)
+    result: tuple[int, str | None] = (next_reported_percent, progress_detail)
     return result
 
 
@@ -638,18 +644,20 @@ def run_planned_downloads(
     """
     results: list[DownloadResult] = []
     fixity_results: list[FixityResult] = []
-    last_reported_percent = 0
-    total_planned_downloads = len(planned_downloads)
+    last_reported_percent: int = 0
+    progress_detail: str | None = None
+    total_planned_downloads: int = len(planned_downloads)
     for planned_download in planned_downloads:
-        destination_path = planned_download.planned_paths.warc_path
+        destination_path: Path = planned_download.planned_paths.warc_path
         if destination_path.exists():
             log.info(
-                'Collection %s skipping download for %s because the destination already exists and proceeding to fixity handling: %s',
+                'Collection %s skipping download for %s because the destination already exists '
+                'and proceeding to fixity handling: %s',
                 collection_id,
                 planned_download.filename,
                 destination_path,
             )
-            fixity_result = write_fixity_sidecars(
+            fixity_result: FixityResult = write_fixity_sidecars(
                 warc_path=destination_path,
                 sha256_path=planned_download.planned_paths.sha256_path,
                 json_path=planned_download.planned_paths.json_path,
@@ -690,7 +698,7 @@ def run_planned_downloads(
             planned_download.source_url,
             destination_path,
         )
-        download_result = download_to_path(client, planned_download.source_url, destination_path)
+        download_result: DownloadResult = download_to_path(client, planned_download.source_url, destination_path)
         results.append(download_result)
         update_file_manifest_for_download_result(
             state=state,
@@ -750,7 +758,7 @@ def run_planned_downloads(
                 planned_download.source_url,
                 download_result.error_message,
             )
-        completed_count = len(results)
+        completed_count: int = len(results)
         last_reported_percent, progress_detail = get_download_progress_milestone_update(
             total_planned_downloads,
             completed_count,
@@ -759,7 +767,7 @@ def run_planned_downloads(
         if progress_detail is not None and progress_callback is not None:
             log.info('Collection %s wrote download progress milestone: %s', collection_id, progress_detail)
             progress_callback(progress_detail)
-    result = (results, fixity_results)
+    result: tuple[list[DownloadResult], list[FixityResult]] = (results, fixity_results)
     return result
 
 
@@ -774,13 +782,14 @@ def log_collection_download_summary(
     Logs a summary of download activity for one collection.
     Called by: process_collection_job()
     """
-    success_count = sum(1 for result in download_results if result.success)
-    failure_count = sum(1 for result in download_results if not result.success)
-    skipped_count = planned_download_count - len(download_results)
-    fixity_success_count = sum(1 for result in fixity_results if result.success)
-    fixity_failure_count = sum(1 for result in fixity_results if not result.success)
+    success_count: int = sum(1 for result in download_results if result.success)
+    failure_count: int = sum(1 for result in download_results if not result.success)
+    skipped_count: int = planned_download_count - len(download_results)
+    fixity_success_count: int = sum(1 for result in fixity_results if result.success)
+    fixity_failure_count: int = sum(1 for result in fixity_results if not result.success)
     log.info(
-        'Collection %s has %s pending candidates, %s planned downloads, %s download successes, %s download failures, %s skipped existing files, %s fixity successes, and %s fixity failures.',
+        'Collection %s has %s pending candidates, %s planned downloads, %s download successes, '
+        '%s download failures, %s skipped existing files, %s fixity successes, and %s fixity failures.',
         collection_job.collection_id,
         pending_download_count,
         planned_download_count,
@@ -797,7 +806,7 @@ def iter_collection_warc_paths(storage_root: Path, collection_id: int) -> list[P
     Returns downloaded WARC paths currently present on disk for one collection.
     Called by: get_collection_downloaded_totals()
     """
-    collection_root = storage_root / 'collections' / str(collection_id)
+    collection_root: Path = storage_root / 'collections' / str(collection_id)
     result: list[Path] = []
     if collection_root.exists():
         result = [
@@ -813,16 +822,16 @@ def get_collection_downloaded_totals(storage_root: Path, collection_id: int) -> 
     Returns the total downloaded WARC count and byte size currently present for one collection.
     Called by: build_collection_summary_update()
     """
-    warc_paths = iter_collection_warc_paths(storage_root, collection_id)
-    total_count = len(warc_paths)
-    total_size = sum(path.stat().st_size for path in warc_paths)
+    warc_paths: list[Path] = iter_collection_warc_paths(storage_root, collection_id)
+    total_count: int = len(warc_paths)
+    total_size: int = sum(path.stat().st_size for path in warc_paths)
     log.info(
         'Collection %s final summary totals computed from on-disk WARCs: %s files, %s bytes.',
         collection_id,
         total_count,
         total_size,
     )
-    result = (total_count, total_size)
+    result: tuple[int, int] = (total_count, total_size)
     return result
 
 
@@ -833,7 +842,7 @@ def get_observed_seed_ids_from_filenames(filenames: list[str]) -> set[str]:
     """
     result: set[str] = set()
     for filename in filenames:
-        seed_id = extract_warc_seed_id(filename)
+        seed_id: str = extract_warc_seed_id(filename)
         if seed_id != UNKNOWN_SEED_FOLDER_NAME:
             result.add(seed_id)
     return result
@@ -850,12 +859,12 @@ def get_collection_observed_seed_count(
     """
     discovered_filenames: list[str] = []
     for record in discovered_records:
-        filename_value = record.get('filename')
+        filename_value: object = record.get('filename')
         if isinstance(filename_value, str) and filename_value.strip():
             discovered_filenames.append(filename_value.strip())
-    local_filenames = [path.name for path in iter_collection_warc_paths(storage_root, collection_id)]
-    seed_ids = get_observed_seed_ids_from_filenames(discovered_filenames + local_filenames)
-    result = len(seed_ids)
+    local_filenames: list[str] = [path.name for path in iter_collection_warc_paths(storage_root, collection_id)]
+    seed_ids: set[str] = get_observed_seed_ids_from_filenames(discovered_filenames + local_filenames)
+    result: int = len(seed_ids)
     return result
 
 
@@ -869,10 +878,12 @@ def build_collection_summary_update(
     Builds final spreadsheet summary-field values for one collection.
     Called by: build_collection_final_report()
     """
-    collection_root = storage_root / 'collections' / str(collection_id)
+    collection_root: Path = storage_root / 'collections' / str(collection_id)
+    total_downloaded_count: int
+    total_downloaded_size: int
     total_downloaded_count, total_downloaded_size = get_collection_downloaded_totals(storage_root, collection_id)
-    displayed_download_timestamp = format_local_display_timestamp(discovery_completed_at)
-    result = CollectionSummaryUpdate(
+    displayed_download_timestamp: str = format_local_display_timestamp(discovery_completed_at)
+    result: CollectionSummaryUpdate = CollectionSummaryUpdate(
         last_download_timestamp=displayed_download_timestamp,
         total_col_warc_count=str(total_downloaded_count),
         total_downloaded_collection_size=format_downloaded_size_gb(total_downloaded_size),
@@ -895,23 +906,27 @@ def build_collection_final_report(
     Builds the final collection status and summary payload for spreadsheet reporting.
     Called by: process_collection_job()
     """
-    failure_count = sum(1 for result in download_results if not result.success)
+    failure_count: int = sum(1 for result in download_results if not result.success)
     failure_count += sum(1 for result in fixity_results if not result.success)
-    discovery_records = discovered_records if discovered_records is not None else []
-    status_main = STATUS_DOWNLOADED_WITHOUT_ERRORS
-    successful_download_count = sum(1 for result in download_results if result.success)
-    download_noun = 'download' if successful_download_count == 1 else 'downloads'
-    status_detail = f'{successful_download_count} file {download_noun} completed successfully'
-    latest_fetch_file_count = count_discovered_warc_filename_records(discovery_records)
+    discovery_records: list[dict[str, object]] = discovered_records if discovered_records is not None else []
+    status_main: str = STATUS_DOWNLOADED_WITHOUT_ERRORS
+    successful_download_count: int = sum(1 for result in download_results if result.success)
+    download_noun: str = 'download' if successful_download_count == 1 else 'downloads'
+    status_detail: str = f'{successful_download_count} file {download_noun} completed successfully'
+    latest_fetch_file_count: int = count_discovered_warc_filename_records(discovery_records)
     if not planned_downloads:
         status_main = STATUS_NO_NEW_FILES_TO_DOWNLOAD
         status_detail = f'since {format_local_display_timestamp(discovery_completed_at)}'
     elif failure_count > 0:
         status_main = STATUS_COMPLETED_WITH_SOME_FILE_FAILURES
-        operation_noun = 'operation' if failure_count == 1 else 'operations'
+        operation_noun: str = 'operation' if failure_count == 1 else 'operations'
         status_detail = f'{failure_count} file {operation_noun} failed'
-    observed_seed_count = get_collection_observed_seed_count(storage_root, collection_job.collection_id, discovery_records)
-    result = CollectionProcessingReport(
+    observed_seed_count: int = get_collection_observed_seed_count(
+        storage_root,
+        collection_job.collection_id,
+        discovery_records,
+    )
+    result: CollectionProcessingReport = CollectionProcessingReport(
         status_update=CollectionProcessingStatusUpdate(
             status_last_fetch=status_main,
             status_detail=status_detail,
@@ -938,7 +953,7 @@ def build_collection_failure_report(
     Builds a failure-oriented spreadsheet report for collection-level processing exceptions.
     Called by: run_collection_orchestration()
     """
-    result = CollectionProcessingReport(
+    result: CollectionProcessingReport = CollectionProcessingReport(
         status_update=CollectionProcessingStatusUpdate(
             status_last_fetch=status_main,
             status_detail=status_detail,
@@ -963,12 +978,12 @@ def determine_collection_discovery_mode(
     Determines the collection discovery mode and optional store-time-after boundary.
     Called by: process_collection_job()
     """
-    discovery_mode = DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN
+    discovery_mode: str = DISCOVERY_MODE_FULL_BACKFILL_FIRST_RUN
     after_datetime: datetime | None = None
     if checkpoint_store_time_max is not None:
         discovery_mode = DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW
         after_datetime = compute_store_time_after_datetime(checkpoint_store_time_max, now)
-    result = (discovery_mode, after_datetime)
+    result: tuple[str, datetime | None] = (discovery_mode, after_datetime)
     return result
 
 
@@ -986,10 +1001,14 @@ def write_collection_start_status(
     log.info('Collection %s discovery mode: %s.', collection_job.collection_id, discovery_mode)
     if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
         log.info('Collection %s store-time-after boundary: %s.', collection_job.collection_id, after_datetime.isoformat())
-    status_detail = 'full historical backfill'
+    status_detail: str = 'full historical backfill'
     if discovery_mode == DISCOVERY_MODE_INCREMENTAL_OVERLAP_WINDOW and after_datetime is not None:
         status_detail = f'store-time-after {format_local_display_timestamp(after_datetime.isoformat())}'
-    status_update = build_collection_status_update(STATUS_DISCOVERY_IN_PROGRESS, status_detail, '')
+    status_update: CollectionProcessingStatusUpdate = build_collection_status_update(
+        STATUS_DISCOVERY_IN_PROGRESS,
+        status_detail,
+        '',
+    )
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
@@ -1003,7 +1022,7 @@ def write_collection_download_planning_status(
     Writes the collection-level status after download planning completes.
     Called by: process_collection_job()
     """
-    status_update = build_download_planning_status(discovered_warc_count)
+    status_update: CollectionProcessingStatusUpdate = build_download_planning_status(discovered_warc_count)
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
@@ -1017,7 +1036,7 @@ def write_collection_no_new_files_status(
     Writes the collection-level status for a no-op collection after planning.
     Called by: process_collection_job()
     """
-    status_update = build_no_new_files_status(discovered_warc_count)
+    status_update: CollectionProcessingStatusUpdate = build_no_new_files_status(discovered_warc_count)
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
@@ -1032,7 +1051,10 @@ def write_collection_download_start_status(
     Writes the collection-level status when sequential downloading begins.
     Called by: process_collection_job()
     """
-    status_update = build_download_start_status(discovered_warc_count, planned_download_count)
+    status_update: CollectionProcessingStatusUpdate = build_download_start_status(
+        discovered_warc_count,
+        planned_download_count,
+    )
     write_collection_status_update(worksheet, header_location, collection_job, status_update)
 
 
@@ -1047,7 +1069,7 @@ def write_collection_download_progress_status(
     Writes one coarse collection-level download progress milestone.
     Called by: process_collection_job.<lambda>()
     """
-    status_update = build_collection_status_update(
+    status_update: CollectionProcessingStatusUpdate = build_collection_status_update(
         STATUS_DOWNLOADING_IN_PROGRESS,
         progress_detail,
         discovered_warc_count,
@@ -1086,9 +1108,11 @@ def process_collection_job(
     Processes one collection through the implemented sequential orchestration stages and returns final reporting values.
     Called by: run_collection_orchestration()
     """
-    state = load_collection_state(storage_root, collection_job.collection_id)
-    checkpoint_store_time_max = state.get('enumeration_checkpoint_store_time_max')
-    checkpoint_value = checkpoint_store_time_max if isinstance(checkpoint_store_time_max, str) else None
+    state: dict[str, object] = load_collection_state(storage_root, collection_job.collection_id)
+    checkpoint_store_time_max: object = state.get('enumeration_checkpoint_store_time_max')
+    checkpoint_value: str | None = checkpoint_store_time_max if isinstance(checkpoint_store_time_max, str) else None
+    discovery_mode: str
+    after_datetime: datetime | None
     discovery_mode, after_datetime = determine_collection_discovery_mode(checkpoint_value, datetime.now(UTC))
 
     if after_datetime is None:
@@ -1108,7 +1132,7 @@ def process_collection_job(
     write_collection_start_status(worksheet, header_location, collection_job, discovery_mode, after_datetime)
     log.info('Collection %s spreadsheet status updated: discovery in progress.', collection_job.collection_id)
 
-    discovery_result = fetch_collection_discovery(
+    discovery_result: DiscoveryResult = fetch_collection_discovery(
         client=client,
         base_url=wasapi_base_url,
         collection_id=collection_job.collection_id,
@@ -1120,7 +1144,7 @@ def process_collection_job(
         len(discovery_result.records),
         len(discovery_result.request_records),
     )
-    discovered_warc_count = count_discovered_warc_filename_records(discovery_result.records)
+    discovered_warc_count: int = count_discovered_warc_filename_records(discovery_result.records)
 
     if discovery_result.completed_successfully:
         state['enumeration_checkpoint_store_time_max'] = discovery_result.max_observed_store_time
@@ -1131,20 +1155,24 @@ def process_collection_job(
             discovery_result.max_observed_store_time,
         )
 
-    pending_download_count = count_pending_download_candidates(discovery_result.records, state)
-    planned_paths = build_planned_download_paths(storage_root, collection_job.collection_id, discovery_result.records)
-    log_planned_download_paths(collection_job.collection_id, planned_paths)
-    discovery_planned_downloads = build_planned_downloads(
+    pending_download_count: int = count_pending_download_candidates(discovery_result.records, state)
+    planned_paths: list[PlannedCollectionPaths] = build_planned_download_paths(
         storage_root,
         collection_job.collection_id,
         discovery_result.records,
     )
-    reconciliation_planned_downloads = build_reconciliation_retry_downloads(
+    log_planned_download_paths(collection_job.collection_id, planned_paths)
+    discovery_planned_downloads: list[PlannedDownload] = build_planned_downloads(
+        storage_root,
+        collection_job.collection_id,
+        discovery_result.records,
+    )
+    reconciliation_planned_downloads: list[PlannedDownload] = build_reconciliation_retry_downloads(
         storage_root,
         collection_job.collection_id,
         state,
     )
-    planned_downloads = merge_planned_downloads(
+    planned_downloads: list[PlannedDownload] = merge_planned_downloads(
         reconciliation_planned_downloads,
         discovery_planned_downloads,
     )
@@ -1154,6 +1182,8 @@ def process_collection_job(
         len(discovery_planned_downloads),
         len(planned_downloads),
     )
+    active_downloads: list[PlannedDownload]
+    evaluation_reason_counts: dict[str, int]
     active_downloads, evaluation_reason_counts = build_evaluated_active_downloads(planned_downloads, state)
     log_active_download_evaluation_counts(
         collection_job.collection_id,
@@ -1180,7 +1210,7 @@ def process_collection_job(
         len(active_downloads),
     )
     if not active_downloads:
-        discovery_completed_at = datetime.now(UTC).isoformat()
+        discovery_completed_at: str = datetime.now(UTC).isoformat()
         write_collection_no_new_files_status(
             worksheet,
             header_location,
@@ -1201,6 +1231,8 @@ def process_collection_job(
             collection_job.collection_id,
             len(active_downloads),
         )
+    download_results: list[DownloadResult]
+    fixity_results: list[FixityResult]
     download_results, fixity_results = run_planned_downloads(
         client,
         storage_root,
@@ -1222,7 +1254,7 @@ def process_collection_job(
         download_results,
         fixity_results,
     )
-    result = build_collection_final_report(
+    result: CollectionProcessingReport = build_collection_final_report(
         storage_root=storage_root,
         collection_job=collection_job,
         discovery_completed_at=datetime.now(UTC).isoformat(),
@@ -1251,20 +1283,20 @@ def get_manifest_expected_size(state: dict[str, object], filename: str) -> int |
     Returns the expected size for one filename when current manifest data provides it.
     Called by: evaluate_planned_download_need()
     """
-    files_value = state.get('files')
-    files_state = files_value if isinstance(files_value, dict) else {}
-    entry_value = files_state.get(filename)
+    files_value: object = state.get('files')
+    files_state: dict[object, object] = files_value if isinstance(files_value, dict) else {}
+    entry_value: object = files_state.get(filename)
     result: int | None = None
     if isinstance(entry_value, dict):
-        size_value = entry_value.get('size')
+        size_value: object = entry_value.get('size')
         if isinstance(size_value, int):
             result = size_value
         else:
-            json_path_value = entry_value.get('json_path')
+            json_path_value: object = entry_value.get('json_path')
             if isinstance(json_path_value, str) and json_path_value.strip():
                 try:
-                    json_data = json.loads(Path(json_path_value).read_text(encoding='utf-8'))
-                    json_size_value = json_data.get('size') if isinstance(json_data, dict) else None
+                    json_data: object = json.loads(Path(json_path_value).read_text(encoding='utf-8'))
+                    json_size_value: object = json_data.get('size') if isinstance(json_data, dict) else None
                     if isinstance(json_size_value, int):
                         result = json_size_value
                 except Exception:
@@ -1280,26 +1312,26 @@ def evaluate_planned_download_need(
     Evaluates whether one planned candidate still requires backup work now.
     Called by: build_evaluated_active_downloads()
     """
-    warc_path = planned_download.planned_paths.warc_path
+    warc_path: Path = planned_download.planned_paths.warc_path
     if not warc_path.exists():
         return DownloadNeedEvaluation(needs_work=True, reason='missing_warc')
 
-    expected_size = get_manifest_expected_size(state, planned_download.filename)
+    expected_size: int | None = get_manifest_expected_size(state, planned_download.filename)
     if expected_size is not None and warc_path.stat().st_size != expected_size:
         return DownloadNeedEvaluation(needs_work=True, reason='size_mismatch')
 
-    fixity_validation = validate_fixity_sidecars(
+    fixity_validation: FixityValidationResult = validate_fixity_sidecars(
         warc_path=warc_path,
         sha256_path=planned_download.planned_paths.sha256_path,
         json_path=planned_download.planned_paths.json_path,
     )
     if not fixity_validation.is_valid:
-        reason = fixity_validation.error_reason or 'invalid_fixity'
+        reason: str = fixity_validation.error_reason or 'invalid_fixity'
         return DownloadNeedEvaluation(needs_work=True, reason=reason)
 
-    files_value = state.get('files')
-    files_state = files_value if isinstance(files_value, dict) else {}
-    entry_value = files_state.get(planned_download.filename)
+    files_value: object = state.get('files')
+    files_state: dict[object, object] = files_value if isinstance(files_value, dict) else {}
+    entry_value: object = files_state.get(planned_download.filename)
     if isinstance(entry_value, dict) and entry_value.get('status') == 'failed':
         return DownloadNeedEvaluation(needs_work=True, reason='retry_after_prior_failure')
 
@@ -1317,11 +1349,11 @@ def build_evaluated_active_downloads(
     active_downloads: list[PlannedDownload] = []
     reason_counts: dict[str, int] = {}
     for planned_download in planned_downloads:
-        evaluation = evaluate_planned_download_need(planned_download, state)
+        evaluation: DownloadNeedEvaluation = evaluate_planned_download_need(planned_download, state)
         reason_counts[evaluation.reason] = reason_counts.get(evaluation.reason, 0) + 1
         if evaluation.needs_work:
             active_downloads.append(planned_download)
-    result = (active_downloads, reason_counts)
+    result: tuple[list[PlannedDownload], dict[str, int]] = (active_downloads, reason_counts)
     return result
 
 

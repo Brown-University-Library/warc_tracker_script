@@ -15,7 +15,7 @@ class TestGetRequiredLogFilePath(TestCase):
     Test cases for log-path configuration.
     """
 
-    def test_returns_log_file_under_configured_directory(self):
+    def test_returns_log_file_under_configured_directory(self) -> None:
         """
         Checks that LOG_PATH is used to build the final log file path.
         """
@@ -32,7 +32,7 @@ class TestGetRequiredLogFilePath(TestCase):
 
             self.assertEqual(result, log_file_path)
 
-    def test_raises_when_log_path_is_missing(self):
+    def test_raises_when_log_path_is_missing(self) -> None:
         """
         Checks that missing LOG_PATH raises a clear error.
         """

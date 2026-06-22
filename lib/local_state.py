@@ -14,7 +14,7 @@ def build_attempt_timestamp() -> str:
     Builds the current UTC timestamp for manifest attempt tracking.
     Called by: update_file_manifest_for_download_result()
     """
-    result = datetime.now(timezone.utc).isoformat()
+    result: str = datetime.now(timezone.utc).isoformat()
     return result
 
 
@@ -29,7 +29,7 @@ def build_collection_root_path(storage_root: Path, collection_id: int) -> Path:
     Builds the collection root path under the configured storage root.
     Called by: build_state_file_path()
     """
-    result = storage_root / 'collections' / str(collection_id)
+    result: Path = storage_root / 'collections' / str(collection_id)
     return result
 
 
@@ -38,8 +38,8 @@ def build_state_file_path(storage_root: Path, collection_id: int) -> Path:
     Builds the state.json path for one collection.
     Called by: load_collection_state()
     """
-    collection_root_path = build_collection_root_path(storage_root, collection_id)
-    result = collection_root_path / 'state.json'
+    collection_root_path: Path = build_collection_root_path(storage_root, collection_id)
+    result: Path = collection_root_path / 'state.json'
     return result
 
 
@@ -48,7 +48,7 @@ def make_default_collection_state() -> dict[str, object]:
     Builds the default in-memory collection state structure.
     Called by: load_collection_state()
     """
-    result = {
+    result: dict[str, object] = {
         'enumeration_checkpoint_store_time_max': None,
         'files': {},
     }
@@ -60,7 +60,7 @@ def normalize_collection_state(state: dict[str, object]) -> dict[str, object]:
     Normalizes a loaded collection state and fills missing required keys.
     Called by: get_file_manifest_entry()
     """
-    result = dict(state)
+    result: dict[str, object] = dict(state)
     for key, default_value in REQUIRED_TOP_LEVEL_DEFAULTS.items():
         if key not in result:
             if isinstance(default_value, dict):
@@ -68,7 +68,7 @@ def normalize_collection_state(state: dict[str, object]) -> dict[str, object]:
             else:
                 result[key] = default_value
 
-    files_value = result.get('files')
+    files_value: object = result.get('files')
     if not isinstance(files_value, dict):
         raise LocalStateError('Collection state field `files` must be a JSON object.')
     return result
@@ -79,17 +79,17 @@ def get_file_manifest_entry(state: dict[str, object], filename: str) -> dict[str
     Returns the mutable manifest entry for one filename, creating it when absent.
     Called by: update_file_manifest_for_planned_download()
     """
-    normalized_state = normalize_collection_state(state)
-    files_value = normalized_state['files']
+    normalized_state: dict[str, object] = normalize_collection_state(state)
+    files_value: object = normalized_state['files']
     if not isinstance(files_value, dict):
         raise LocalStateError('Collection state field `files` must be a JSON object.')
 
-    entry_value = files_value.get(filename)
+    entry_value: object = files_value.get(filename)
     if not isinstance(entry_value, dict):
         entry_value = {}
         files_value[filename] = entry_value
 
-    result = entry_value
+    result: dict[str, object] = entry_value
     return result
 
 
@@ -105,16 +105,16 @@ def update_file_manifest_for_planned_download(
     Updates one file manifest entry with durable pre-download planning metadata.
     Called by: persist_planned_downloads_to_state()
     """
-    entry = get_file_manifest_entry(state, filename)
+    entry: dict[str, object] = get_file_manifest_entry(state, filename)
     entry['source_url'] = source_url
     entry['warc_path'] = str(warc_path)
     if seed_id:
         entry['seed_id'] = seed_id
     entry['discovered_at'] = discovered_at
-    current_status = entry.get('status')
+    current_status: object = entry.get('status')
     if current_status != 'downloaded':
         entry['status'] = 'pending_download'
-    result = entry
+    result: dict[str, object] = entry
     return result
 
 
@@ -131,9 +131,9 @@ def update_file_manifest_for_download_result(
     Updates one file manifest entry with the durable download outcome.
     Called by: run_planned_downloads()
     """
-    entry = get_file_manifest_entry(state, filename)
-    current_error_count = entry.get('error_count', 0)
-    error_count = current_error_count if isinstance(current_error_count, int) else 0
+    entry: dict[str, object] = get_file_manifest_entry(state, filename)
+    current_error_count: object = entry.get('error_count', 0)
+    error_count: int = current_error_count if isinstance(current_error_count, int) else 0
     entry['source_url'] = source_url
     entry['warc_path'] = str(warc_path)
     if seed_id:
@@ -147,7 +147,7 @@ def update_file_manifest_for_download_result(
         entry['status'] = 'failed'
         entry['error_count'] = error_count + 1
         entry['error_summary'] = error_message
-    result = entry
+    result: dict[str, object] = entry
     return result
 
 
@@ -164,9 +164,9 @@ def update_file_manifest_for_fixity_result(
     Updates one file manifest entry with the durable fixity outcome.
     Called by: run_planned_downloads()
     """
-    entry = get_file_manifest_entry(state, filename)
-    current_error_count = entry.get('error_count', 0)
-    error_count = current_error_count if isinstance(current_error_count, int) else 0
+    entry: dict[str, object] = get_file_manifest_entry(state, filename)
+    current_error_count: object = entry.get('error_count', 0)
+    error_count: int = current_error_count if isinstance(current_error_count, int) else 0
     entry['sha256_path'] = str(sha256_path)
     entry['json_path'] = str(json_path)
     entry['fixity_status'] = 'created' if success else 'failed'
@@ -179,7 +179,7 @@ def update_file_manifest_for_fixity_result(
         entry['status'] = 'fixity_failed'
         entry['error_count'] = error_count + 1
         entry['error_summary'] = error_message
-    result = entry
+    result: dict[str, object] = entry
     return result
 
 
@@ -188,12 +188,13 @@ def load_collection_state(storage_root: Path, collection_id: int) -> dict[str, o
     Loads collection state from disk or returns the default state when absent.
     Called by: process_collection_job()
     """
-    state_file_path = build_state_file_path(storage_root, collection_id)
+    state_file_path: Path = build_state_file_path(storage_root, collection_id)
+    result: dict[str, object]
     if not state_file_path.exists():
         result = make_default_collection_state()
     else:
         try:
-            payload = json.loads(state_file_path.read_text(encoding='utf-8'))
+            payload: object = json.loads(state_file_path.read_text(encoding='utf-8'))
         except json.JSONDecodeError as exc:
             raise LocalStateError(f'Malformed collection state JSON in {state_file_path}.') from exc
         if not isinstance(payload, dict):
@@ -207,15 +208,15 @@ def save_collection_state(storage_root: Path, collection_id: int, state: dict[st
     Saves collection state to disk using an atomic replace.
     Called by: save_collection_state_after_file_processing()
     """
-    normalized_state = normalize_collection_state(state)
-    state_file_path = build_state_file_path(storage_root, collection_id)
+    normalized_state: dict[str, object] = normalize_collection_state(state)
+    state_file_path: Path = build_state_file_path(storage_root, collection_id)
     state_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with NamedTemporaryFile('w', encoding='utf-8', dir=state_file_path.parent, delete=False) as temp_file:
         json.dump(normalized_state, temp_file, indent=2, sort_keys=True)
         temp_file.write('\n')
-        temp_file_path = Path(temp_file.name)
+        temp_file_path: Path = Path(temp_file.name)
 
     temp_file_path.replace(state_file_path)
-    result = state_file_path
+    result: Path = state_file_path
     return result

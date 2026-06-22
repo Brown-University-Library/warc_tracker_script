@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     Parses command-line arguments.
     Called by: main()
     """
-    parser = argparse.ArgumentParser(
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description=(
             'Captures screenshots of a Google Sheet on a repeating interval. '
             'Use --headed on the first run if you need to sign into Google.'

@@ -23,7 +23,7 @@ def build_partial_download_path(destination_path: Path) -> Path:
     Builds the partial-download path for one final destination.
     Called by: download_to_path()
     """
-    result = destination_path.with_name(f'{destination_path.name}.partial')
+    result: Path = destination_path.with_name(f'{destination_path.name}.partial')
     return result
 
 
@@ -37,12 +37,12 @@ def download_to_path(
     Streams one remote file to a local destination using a partial file and atomic rename.
     Called by: run_planned_downloads()
     """
-    partial_path = build_partial_download_path(destination_path)
+    partial_path: Path = build_partial_download_path(destination_path)
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     if partial_path.exists():
         partial_path.unlink()
 
-    bytes_written = 0
+    bytes_written: int = 0
     try:
         with client.stream('GET', source_url) as response:
             response.raise_for_status()
@@ -53,7 +53,7 @@ def download_to_path(
                     partial_file.write(chunk)
                     bytes_written += len(chunk)
         partial_path.replace(destination_path)
-        result = DownloadResult(
+        result: DownloadResult = DownloadResult(
             success=True,
             destination_path=destination_path,
             partial_path=partial_path,

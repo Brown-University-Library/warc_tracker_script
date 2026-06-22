@@ -27,21 +27,21 @@ class TestParseCollectionId(TestCase):
     Test cases for parsing collection ids.
     """
 
-    def test_integer_string(self):
+    def test_integer_string(self) -> None:
         """
         Checks that a simple integer string parses successfully.
         """
         result = parse_collection_id('123')
         self.assertEqual(result, 123)
 
-    def test_float_string(self):
+    def test_float_string(self) -> None:
         """
         Checks that a float-like string parses to an integer.
         """
         result = parse_collection_id('456.0')
         self.assertEqual(result, 456)
 
-    def test_invalid_string(self):
+    def test_invalid_string(self) -> None:
         """
         Checks that invalid strings return None.
         """
@@ -54,7 +54,7 @@ class TestParseCollectionJobs(TestCase):
     Test cases for parsing collection jobs.
     """
 
-    def test_parses_active_rows(self):
+    def test_parses_active_rows(self) -> None:
         """
         Checks that only active rows become collection jobs.
         """
@@ -70,7 +70,7 @@ class TestParseCollectionJobs(TestCase):
         self.assertEqual(result[0].repository, 'UA')
         self.assertEqual(result[0].row_number, 3)
 
-    def test_header_variants(self):
+    def test_header_variants(self) -> None:
         """
         Checks that header spacing variants are accepted.
         """
@@ -83,7 +83,7 @@ class TestParseCollectionJobs(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].collection_id, 789)
 
-    def test_new_reporting_column_labels_are_accepted(self):
+    def test_new_reporting_column_labels_are_accepted(self) -> None:
         """
         Checks that the new row-3 reporting column labels are accepted.
         """
@@ -129,7 +129,7 @@ class TestCollectionReportingContract(TestCase):
     Test cases for worksheet reporting-column validation and writes.
     """
 
-    def test_validation_fails_when_reporting_column_is_missing(self):
+    def test_validation_fails_when_reporting_column_is_missing(self) -> None:
         """
         Checks that reporting validation fails clearly when a required column is absent.
         """
@@ -152,7 +152,7 @@ class TestCollectionReportingContract(TestCase):
 
         self.assertIn('status_detail', str(exc_context.exception))
 
-    def test_start_status_write_uses_expected_row_and_payload(self):
+    def test_start_status_write_uses_expected_row_and_payload(self) -> None:
         """
         Checks that start-status writes target the expected row and status columns.
         """
@@ -182,7 +182,7 @@ class TestCollectionReportingContract(TestCase):
             ],
         )
 
-    def test_final_reporting_write_includes_status_and_summary_fields(self):
+    def test_final_reporting_write_includes_status_and_summary_fields(self) -> None:
         """
         Checks that final reporting writes status and required summary fields together.
         """
@@ -235,7 +235,7 @@ class TestCollectionSheetConnectionValidation(TestCase):
     Test cases for spreadsheet connection and editability validation.
     """
 
-    def test_build_spreadsheet_editability_probe_update_targets_reporting_header(self):
+    def test_build_spreadsheet_editability_probe_update_targets_reporting_header(self) -> None:
         """
         Checks that the editability probe rewrites the status header cell with its existing value.
         """
@@ -257,7 +257,7 @@ class TestCollectionSheetConnectionValidation(TestCase):
 
         self.assertEqual(result, [{'range': 'C2', 'values': [['Status-Main']]}])
 
-    def test_validate_collection_sheet_connection_loads_context_and_writes_probe(self):
+    def test_validate_collection_sheet_connection_loads_context_and_writes_probe(self) -> None:
         """
         Checks that connection validation opens the worksheet and performs a same-value editability write.
         """

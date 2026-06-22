@@ -20,14 +20,14 @@ class TestExtractWarcTimestampParts(TestCase):
     Test cases for WARC filename timestamp parsing.
     """
 
-    def test_extracts_year_and_month_from_valid_warc_filename(self):
+    def test_extracts_year_and_month_from_valid_warc_filename(self) -> None:
         """
         Checks that a valid WARC filename yields the expected year and month.
         """
         result = extract_warc_timestamp_parts('ARCHIVEIT-123-20260306123456-00000-example.warc.gz')
         self.assertEqual(result, ('2026', '03'))
 
-    def test_raises_for_filename_without_parseable_timestamp(self):
+    def test_raises_for_filename_without_parseable_timestamp(self) -> None:
         """
         Checks that an invalid filename raises a clear storage-layout error.
         """
@@ -40,7 +40,7 @@ class TestExtractWarcSeedId(TestCase):
     Test cases for WARC filename seed-id parsing.
     """
 
-    def test_extracts_normalized_seed_id_from_valid_warc_filename(self):
+    def test_extracts_normalized_seed_id_from_valid_warc_filename(self) -> None:
         """
         Checks that a valid Archive-It filename yields the expected seed folder name.
         """
@@ -48,7 +48,7 @@ class TestExtractWarcSeedId(TestCase):
 
         self.assertEqual(result, 'SEED789')
 
-    def test_returns_unknown_seed_for_filename_without_seed_id(self):
+    def test_returns_unknown_seed_for_filename_without_seed_id(self) -> None:
         """
         Checks that a filename without a seed id uses the unknown-seed folder.
         """
@@ -62,7 +62,7 @@ class TestBuildPaths(TestCase):
     Test cases for local WARC and fixity path building.
     """
 
-    def test_builds_expected_warc_destination_path(self):
+    def test_builds_expected_warc_destination_path(self) -> None:
         """
         Checks that the WARC destination path matches the collection year/month layout.
         """
@@ -85,7 +85,7 @@ class TestBuildPaths(TestCase):
             / 'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz',
         )
 
-    def test_builds_expected_fixity_paths(self):
+    def test_builds_expected_fixity_paths(self) -> None:
         """
         Checks that the fixity paths are stored next to the WARC file.
         """
@@ -107,7 +107,7 @@ class TestBuildPaths(TestCase):
             expected_root / 'ARCHIVEIT-123-JOB456-SEED789-20260306123456-00000-example.warc.gz.json',
         )
 
-    def test_plans_collection_paths_as_structured_result(self):
+    def test_plans_collection_paths_as_structured_result(self) -> None:
         """
         Checks that planned collection paths return the expected structured path data.
         """

@@ -9,11 +9,11 @@ from google.oauth2.service_account import Credentials
 
 dotenv.load_dotenv()
 
-log = logging.getLogger(__name__)
+log: logging.Logger = logging.getLogger(__name__)
 
-COLLECTION_SHEET_NAME = 'At Collection Level'
-REQUIRED_HEADER_FIELDS = ('collection_id', 'active_inactive')
-REQUIRED_REPORTING_FIELDS = (
+COLLECTION_SHEET_NAME: str = 'At Collection Level'
+REQUIRED_HEADER_FIELDS: tuple[str, ...] = ('collection_id', 'active_inactive')
+REQUIRED_REPORTING_FIELDS: tuple[str, ...] = (
     'status_last_fetch',
     'status_detail',
     'status_last_fetch_file_count',
@@ -125,9 +125,9 @@ class CollectionProcessingStatusUpdate:
         Initializes a status update from canonical or legacy field names.
         Called by: orchestration.build_collection_status_update()
         """
-        resolved_status = status_last_fetch if status_last_fetch is not None else processing_status_main
-        resolved_detail = status_detail if status_detail is not None else processing_status_detail
-        resolved_count = status_last_fetch_file_count
+        resolved_status: str | None = status_last_fetch if status_last_fetch is not None else processing_status_main
+        resolved_detail: str | None = status_detail if status_detail is not None else processing_status_detail
+        resolved_count: str | None = status_last_fetch_file_count
         object.__setattr__(self, 'status_last_fetch', resolved_status or '')
         object.__setattr__(self, 'status_detail', resolved_detail or '')
         object.__setattr__(self, 'status_last_fetch_file_count', resolved_count or '')
@@ -138,7 +138,7 @@ class CollectionProcessingStatusUpdate:
         Returns the legacy status-main field value.
         Called by: no_production_caller()
         """
-        result = self.status_last_fetch
+        result: str = self.status_last_fetch
         return result
 
     @property
@@ -147,7 +147,7 @@ class CollectionProcessingStatusUpdate:
         Returns the legacy status-detail field value.
         Called by: no_production_caller()
         """
-        result = self.status_detail
+        result: str = self.status_detail
         return result
 
 
@@ -179,22 +179,22 @@ class CollectionSummaryUpdate:
         Initializes a summary update from canonical or legacy field names.
         Called by: orchestration.build_collection_summary_update()
         """
-        resolved_timestamp = (
+        resolved_timestamp: str | None = (
             last_download_timestamp
             if last_download_timestamp is not None
             else summary_status_last_wasapi_check
         )
-        resolved_warc_count = (
+        resolved_warc_count: str | None = (
             total_col_warc_count
             if total_col_warc_count is not None
             else summary_status_downloaded_warcs_count
         )
-        resolved_size = (
+        resolved_size: str | None = (
             total_downloaded_collection_size
             if total_downloaded_collection_size is not None
             else summary_status_downloaded_warcs_size
         )
-        resolved_server_path = (
+        resolved_server_path: str | None = (
             server_file_path_collection_level
             if server_file_path_collection_level is not None
             else summary_status_server_path
@@ -211,7 +211,7 @@ class CollectionSummaryUpdate:
         Returns the legacy last-check field value.
         Called by: no_production_caller()
         """
-        result = self.last_download_timestamp
+        result: str = self.last_download_timestamp
         return result
 
     @property
@@ -220,7 +220,7 @@ class CollectionSummaryUpdate:
         Returns the legacy downloaded-WARC-count field value.
         Called by: no_production_caller()
         """
-        result = self.total_col_warc_count
+        result: str = self.total_col_warc_count
         return result
 
     @property
@@ -229,7 +229,7 @@ class CollectionSummaryUpdate:
         Returns the legacy downloaded-WARC-size field value.
         Called by: no_production_caller()
         """
-        result = self.total_downloaded_collection_size
+        result: str = self.total_downloaded_collection_size
         return result
 
     @property
@@ -238,7 +238,7 @@ class CollectionSummaryUpdate:
         Returns the legacy server-path field value.
         Called by: no_production_caller()
         """
-        result = self.server_file_path_collection_level
+        result: str = self.server_file_path_collection_level
         return result
 
 
@@ -247,11 +247,11 @@ def load_gsheet_credentials() -> dict[str, str]:
     Loads service-account credentials from the environment.
     Called by: get_gspread_client()
     """
-    credentials_json = os.getenv('GSHEET_CREDENTIALS_JSON')
+    credentials_json: str | None = os.getenv('GSHEET_CREDENTIALS_JSON')
     if not credentials_json:
         raise ValueError('Missing GSHEET_CREDENTIALS_JSON environment variable.')
 
-    result = json.loads(credentials_json)
+    result: dict[str, str] = json.loads(credentials_json)
     return result
 
 
@@ -260,12 +260,12 @@ def get_gspread_client(*, read_only: bool = True) -> gspread.Client:
     Returns a gspread client authorized for read-only or read-write access.
     Called by: get_collection_worksheet()
     """
-    credentials_data = load_gsheet_credentials()
-    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+    credentials_data: dict[str, str] = load_gsheet_credentials()
+    scopes: list[str] = ['https://www.googleapis.com/auth/spreadsheets.readonly']
     if not read_only:
         scopes = ['https://www.googleapis.com/auth/spreadsheets']
-    credentials = Credentials.from_service_account_info(credentials_data, scopes=scopes)
-    result = gspread.authorize(credentials)
+    credentials: Credentials = Credentials.from_service_account_info(credentials_data, scopes=scopes)
+    result: gspread.Client = gspread.authorize(credentials)
     return result
 
 
@@ -274,9 +274,9 @@ def get_collection_worksheet(spreadsheet_id: str, *, read_only: bool = True) -> 
     Returns the collection-level worksheet from the spreadsheet.
     Called by: fetch_collection_jobs()
     """
-    client = get_gspread_client(read_only=read_only)
-    spreadsheet = client.open_by_key(spreadsheet_id)
-    result = spreadsheet.worksheet(COLLECTION_SHEET_NAME)
+    client: gspread.Client = get_gspread_client(read_only=read_only)
+    spreadsheet: gspread.Spreadsheet = client.open_by_key(spreadsheet_id)
+    result: gspread.Worksheet = spreadsheet.worksheet(COLLECTION_SHEET_NAME)
     return result
 
 
@@ -285,9 +285,9 @@ def normalize_header_value(value: str) -> str:
     Normalizes header values for matching against known aliases.
     Called by: locate_header_row()
     """
-    collapsed = ' '.join(value.strip().split())
-    normalized = collapsed.replace(' / ', '/').replace(' /', '/').replace('/ ', '/')
-    result = normalized.casefold()
+    collapsed: str = ' '.join(value.strip().split())
+    normalized: str = collapsed.replace(' / ', '/').replace(' /', '/').replace('/ ', '/')
+    result: str = normalized.casefold()
     return result
 
 
@@ -305,8 +305,8 @@ def locate_header_row(values: list[list[str]]) -> HeaderLocation | None:
     for row_index, row in enumerate(values):
         column_map: dict[str, int] = {}
         for column_index, cell_value in enumerate(row):
-            normalized = normalize_header_value(cell_value)
-            field_name = alias_to_field.get(normalized)
+            normalized: str = normalize_header_value(cell_value)
+            field_name: str | None = alias_to_field.get(normalized)
             if field_name and field_name not in column_map:
                 column_map[field_name] = column_index
 
@@ -324,13 +324,13 @@ def parse_collection_id(value: str | None) -> int | None:
     """
     result: int | None = None
     if value is not None:
-        cleaned = value.strip()
+        cleaned: str = value.strip()
         if cleaned:
             try:
                 result = int(cleaned)
             except ValueError:
                 try:
-                    float_value = float(cleaned)
+                    float_value: float = float(cleaned)
                 except ValueError:
                     result = None
                 else:
@@ -345,29 +345,29 @@ def parse_collection_jobs(values: list[list[str]]) -> list[CollectionJob]:
     Parses collection jobs from a sheet value grid.
     Called by: fetch_collection_jobs()
     """
-    header_location = locate_header_row(values)
+    header_location: HeaderLocation | None = locate_header_row(values)
     result: list[CollectionJob] = []
     if header_location is None:
         log.error('Unable to locate collection sheet header row.')
     else:
-        data_start_index = header_location.header_row_index + 1
+        data_start_index: int = header_location.header_row_index + 1
         for row_offset, row in enumerate(values[data_start_index:]):
-            row_number = data_start_index + row_offset + 1
-            collection_id_cell = get_row_cell(row, header_location.column_map.get('collection_id'))
-            collection_id = parse_collection_id(collection_id_cell)
+            row_number: int = data_start_index + row_offset + 1
+            collection_id_cell: str | None = get_row_cell(row, header_location.column_map.get('collection_id'))
+            collection_id: int | None = parse_collection_id(collection_id_cell)
             if collection_id is None:
                 continue
 
-            active_value = get_row_cell(row, header_location.column_map.get('active_inactive'))
-            active_flag = (active_value or '').strip()
+            active_value: str | None = get_row_cell(row, header_location.column_map.get('active_inactive'))
+            active_flag: str = (active_value or '').strip()
             if active_flag != 'Active':
                 if active_flag:
                     log.warning('Skipping collection row %s with unexpected active flag: %s', row_number, active_flag)
                 continue
 
-            repository = get_row_cell(row, header_location.column_map.get('repository'))
-            collection_url = get_row_cell(row, header_location.column_map.get('collection_url'))
-            collection_name = get_row_cell(row, header_location.column_map.get('collection_name'))
+            repository: str | None = get_row_cell(row, header_location.column_map.get('repository'))
+            collection_url: str | None = get_row_cell(row, header_location.column_map.get('collection_url'))
+            collection_name: str | None = get_row_cell(row, header_location.column_map.get('collection_name'))
 
             result.append(
                 CollectionJob(
@@ -389,7 +389,7 @@ def get_row_cell(row: list[str], column_index: int | None) -> str | None:
     """
     result: str | None = None
     if column_index is not None and column_index < len(row):
-        cell_value = row[column_index].strip()
+        cell_value: str = row[column_index].strip()
         if cell_value:
             result = cell_value
     return result
@@ -411,9 +411,11 @@ def validate_required_reporting_fields(header_location: HeaderLocation) -> None:
     Validates that the required reporting columns exist in the worksheet header.
     Called by: load_collection_sheet_context()
     """
-    missing_fields = [field_name for field_name in REQUIRED_REPORTING_FIELDS if field_name not in header_location.column_map]
+    missing_fields: list[str] = [
+        field_name for field_name in REQUIRED_REPORTING_FIELDS if field_name not in header_location.column_map
+    ]
     if missing_fields:
-        missing_field_display = ', '.join(missing_fields)
+        missing_field_display: str = ', '.join(missing_fields)
         raise CollectionSheetContractError(f'Missing required collection reporting columns: {missing_field_display}')
 
 
@@ -422,14 +424,14 @@ def load_collection_sheet_context(spreadsheet_id: str) -> CollectionSheetContext
     Loads the collection worksheet, validates the reporting contract, and parses active collection jobs.
     Called by: run_collection_orchestration(), validate_collection_sheet_connection()
     """
-    worksheet = get_collection_worksheet(spreadsheet_id, read_only=False)
-    values = worksheet.get_all_values()
-    header_location = locate_header_row(values)
+    worksheet: gspread.Worksheet = get_collection_worksheet(spreadsheet_id, read_only=False)
+    values: list[list[str]] = worksheet.get_all_values()
+    header_location: HeaderLocation | None = locate_header_row(values)
     if header_location is None:
         raise CollectionSheetContractError('Unable to locate collection sheet header row.')
     validate_required_reporting_fields(header_location)
-    collection_jobs = parse_collection_jobs(values)
-    result = CollectionSheetContext(
+    collection_jobs: list[CollectionJob] = parse_collection_jobs(values)
+    result: CollectionSheetContext = CollectionSheetContext(
         worksheet=worksheet,
         header_location=header_location,
         values=values,
@@ -446,11 +448,11 @@ def build_spreadsheet_editability_probe_update(
     Builds a same-value worksheet update that can prove spreadsheet editability.
     Called by: validate_collection_sheet_connection()
     """
-    field_name = 'status_last_fetch'
-    row_index = header_location.header_row_index
-    column_index = get_column_index(header_location, field_name)
-    cell_value = values[row_index][column_index]
-    result = [
+    field_name: str = 'status_last_fetch'
+    row_index: int = header_location.header_row_index
+    column_index: int = get_column_index(header_location, field_name)
+    cell_value: str = values[row_index][column_index]
+    result: list[dict[str, object]] = [
         {
             'range': gspread.utils.rowcol_to_a1(row_index + 1, column_index + 1),
             'values': [[cell_value]],
@@ -464,7 +466,7 @@ def get_column_index(header_location: HeaderLocation, field_name: str) -> int:
     Returns a column index for canonical or legacy field names.
     Called by: build_collection_status_cell_updates()
     """
-    legacy_field_names = {
+    legacy_field_names: dict[str, tuple[str, ...]] = {
         'status_last_fetch': ('processing_status_main',),
         'status_detail': ('processing_status_detail',),
         'last_download_timestamp': ('summary_status_last_wasapi_check',),
@@ -472,7 +474,7 @@ def get_column_index(header_location: HeaderLocation, field_name: str) -> int:
         'total_downloaded_collection_size': ('summary_status_downloaded_warcs_size',),
         'server_file_path_collection_level': ('summary_status_server_path',),
     }
-    candidate_field_names = (field_name, *legacy_field_names.get(field_name, ()))
+    candidate_field_names: tuple[str, ...] = (field_name, *legacy_field_names.get(field_name, ()))
     result: int | None = None
     for candidate_field_name in candidate_field_names:
         if candidate_field_name in header_location.column_map:
@@ -488,8 +490,11 @@ def validate_collection_sheet_connection(spreadsheet_id: str) -> CollectionSheet
     Validates that the collection worksheet can be opened, parsed, and edited.
     Called by: validate_spreadsheet_connection.run_validation()
     """
-    result = load_collection_sheet_context(spreadsheet_id)
-    editability_probe_update = build_spreadsheet_editability_probe_update(result.values, result.header_location)
+    result: CollectionSheetContext = load_collection_sheet_context(spreadsheet_id)
+    editability_probe_update: list[dict[str, object]] = build_spreadsheet_editability_probe_update(
+        result.values,
+        result.header_location,
+    )
     result.worksheet.batch_update(editability_probe_update)
     return result
 
@@ -498,12 +503,12 @@ def build_collection_status_cell_updates(
     header_location: HeaderLocation,
     row_number: int,
     status_update: CollectionProcessingStatusUpdate,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """
     Builds worksheet cell updates for collection status fields.
     Called by: update_collection_processing_status()
     """
-    result = [
+    result: list[dict[str, object]] = [
         {
             'range': gspread.utils.rowcol_to_a1(row_number, get_column_index(header_location, 'status_last_fetch') + 1),
             'values': [[status_update.status_last_fetch]],
@@ -527,19 +532,19 @@ def build_collection_summary_cell_updates(
     header_location: HeaderLocation,
     row_number: int,
     summary_update: CollectionSummaryUpdate,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """
     Builds worksheet cell updates for collection summary fields.
     Called by: update_collection_final_reporting()
     """
-    summary_values = {
+    summary_values: dict[str, str] = {
         'last_download_timestamp': summary_update.last_download_timestamp,
         'total_col_warc_count': summary_update.total_col_warc_count,
         'total_downloaded_collection_size': summary_update.total_downloaded_collection_size,
         'server_file_path_collection_level': summary_update.server_file_path_collection_level,
         'seed_count': summary_update.seed_count,
     }
-    result: list[dict[str, str]] = []
+    result: list[dict[str, object]] = []
     for field_name, field_value in summary_values.items():
         result.append(
             {
@@ -560,7 +565,7 @@ def update_collection_processing_status(
     Updates the collection row with the current processing status fields.
     Called by: write_collection_status_update()
     """
-    cell_updates = build_collection_status_cell_updates(header_location, row_number, status_update)
+    cell_updates: list[dict[str, object]] = build_collection_status_cell_updates(header_location, row_number, status_update)
     worksheet.batch_update(cell_updates)
 
 
@@ -575,6 +580,6 @@ def update_collection_final_reporting(
     Updates the collection row with final status and summary fields.
     Called by: write_collection_final_report()
     """
-    cell_updates = build_collection_status_cell_updates(header_location, row_number, status_update)
+    cell_updates: list[dict[str, object]] = build_collection_status_cell_updates(header_location, row_number, status_update)
     cell_updates.extend(build_collection_summary_cell_updates(header_location, row_number, summary_update))
     worksheet.batch_update(cell_updates)

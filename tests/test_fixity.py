@@ -17,7 +17,7 @@ class TestComputeSha256ForFile(TestCase):
     Test cases for SHA-256 computation.
     """
 
-    def test_returns_expected_hexdigest_for_known_content(self):
+    def test_returns_expected_hexdigest_for_known_content(self) -> None:
         """
         Checks that known file content produces the expected SHA-256 digest.
         """
@@ -38,7 +38,7 @@ class TestWriteFixitySidecars(TestCase):
     Test cases for fixity sidecar writing.
     """
 
-    def test_writes_checksum_and_json_sidecars(self):
+    def test_writes_checksum_and_json_sidecars(self) -> None:
         """
         Checks that checksum and JSON sidecars are written with expected metadata.
         """
@@ -66,7 +66,7 @@ class TestWriteFixitySidecars(TestCase):
             self.assertEqual(json_data['warc_filename'], 'file.warc.gz')
             self.assertTrue(json_data['completed_at'])
 
-    def test_returns_failure_and_leaves_warc_in_place_when_sidecar_write_fails(self):
+    def test_returns_failure_and_leaves_warc_in_place_when_sidecar_write_fails(self) -> None:
         """
         Checks that sidecar-writing failure leaves the downloaded WARC file in place.
         """

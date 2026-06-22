@@ -4,9 +4,9 @@ from pathlib import Path
 
 from lib.local_state import build_collection_root_path
 
-WARC_FILENAME_TIMESTAMP_PATTERN = re.compile(r'-(\d{4})(\d{2})\d{2}\d{6}(?:\d+)?-')
-WARC_FILENAME_SEED_PATTERN = re.compile(r'(?:^|-)SEED(?P<seed_digits>[0-9]+)(?:-|$)')
-UNKNOWN_SEED_FOLDER_NAME = 'UNKNOWN_SEED'
+WARC_FILENAME_TIMESTAMP_PATTERN: re.Pattern[str] = re.compile(r'-(\d{4})(\d{2})\d{2}\d{6}(?:\d+)?-')
+WARC_FILENAME_SEED_PATTERN: re.Pattern[str] = re.compile(r'(?:^|-)SEED(?P<seed_digits>[0-9]+)(?:-|$)')
+UNKNOWN_SEED_FOLDER_NAME: str = 'UNKNOWN_SEED'
 
 
 class StorageLayoutError(ValueError):
@@ -35,13 +35,13 @@ def extract_warc_timestamp_parts(filename: str) -> tuple[str, str]:
     Extracts the year and month partitions from a WARC filename timestamp.
     Called by: build_warc_destination_path()
     """
-    normalized_filename = filename.strip()
+    normalized_filename: str = filename.strip()
     if not normalized_filename:
         raise StorageLayoutError('WARC filename must not be blank.')
-    match = WARC_FILENAME_TIMESTAMP_PATTERN.search(normalized_filename)
+    match: re.Match[str] | None = WARC_FILENAME_TIMESTAMP_PATTERN.search(normalized_filename)
     if match is None:
         raise StorageLayoutError(f'Could not extract year/month timestamp parts from filename: {filename}')
-    result = (match.group(1), match.group(2))
+    result: tuple[str, str] = (match.group(1), match.group(2))
     return result
 
 
@@ -50,11 +50,11 @@ def extract_warc_seed_id(filename: str) -> str:
     Extracts the normalized seed id folder name from a WARC filename.
     Called by: plan_collection_paths()
     """
-    normalized_filename = filename.strip()
+    normalized_filename: str = filename.strip()
     if not normalized_filename:
         raise StorageLayoutError('WARC filename must not be blank.')
-    match = WARC_FILENAME_SEED_PATTERN.search(normalized_filename)
-    result = UNKNOWN_SEED_FOLDER_NAME
+    match: re.Match[str] | None = WARC_FILENAME_SEED_PATTERN.search(normalized_filename)
+    result: str = UNKNOWN_SEED_FOLDER_NAME
     if match is not None:
         result = f'SEED{match.group("seed_digits")}'
     return result
@@ -65,7 +65,7 @@ def build_collection_storage_root(storage_root: Path, collection_id: int) -> Pat
     Builds the collection root path for downloaded WARC content.
     Called by: build_warc_destination_path()
     """
-    result = build_collection_root_path(storage_root, collection_id)
+    result: Path = build_collection_root_path(storage_root, collection_id)
     return result
 
 
@@ -74,10 +74,12 @@ def build_warc_destination_path(storage_root: Path, collection_id: int, filename
     Builds the destination path for one WARC file.
     Called by: plan_collection_paths()
     """
+    year: str
+    month: str
     year, month = extract_warc_timestamp_parts(filename)
-    seed_id = extract_warc_seed_id(filename)
-    collection_root = build_collection_storage_root(storage_root, collection_id)
-    result = collection_root / seed_id / year / month / filename
+    seed_id: str = extract_warc_seed_id(filename)
+    collection_root: Path = build_collection_storage_root(storage_root, collection_id)
+    result: Path = collection_root / seed_id / year / month / filename
     return result
 
 
@@ -86,8 +88,8 @@ def build_fixity_paths(storage_root: Path, collection_id: int, filename: str) ->
     Builds the fixity file paths for one WARC file.
     Called by: plan_collection_paths()
     """
-    warc_path = build_warc_destination_path(storage_root, collection_id, filename)
-    result = (warc_path.with_name(f'{filename}.sha256'), warc_path.with_name(f'{filename}.json'))
+    warc_path: Path = build_warc_destination_path(storage_root, collection_id, filename)
+    result: tuple[Path, Path] = (warc_path.with_name(f'{filename}.sha256'), warc_path.with_name(f'{filename}.json'))
     return result
 
 
@@ -96,11 +98,15 @@ def plan_collection_paths(storage_root: Path, collection_id: int, filename: str)
     Builds the planned local WARC and fixity paths for one filename.
     Called by: build_planned_download_paths()
     """
+    year: str
+    month: str
     year, month = extract_warc_timestamp_parts(filename)
-    seed_id = extract_warc_seed_id(filename)
-    warc_path = build_warc_destination_path(storage_root, collection_id, filename)
+    seed_id: str = extract_warc_seed_id(filename)
+    warc_path: Path = build_warc_destination_path(storage_root, collection_id, filename)
+    sha256_path: Path
+    json_path: Path
     sha256_path, json_path = build_fixity_paths(storage_root, collection_id, filename)
-    result = PlannedCollectionPaths(
+    result: PlannedCollectionPaths = PlannedCollectionPaths(
         filename=filename,
         warc_path=warc_path,
         sha256_path=sha256_path,

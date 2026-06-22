@@ -21,7 +21,7 @@ class TestResolveSpreadsheetId(TestCase):
     Test cases for resolving the spreadsheet id.
     """
 
-    def test_uses_cli_value_when_present(self):
+    def test_uses_cli_value_when_present(self) -> None:
         """
         Checks that a CLI spreadsheet id takes precedence.
         """
@@ -30,7 +30,7 @@ class TestResolveSpreadsheetId(TestCase):
 
         self.assertEqual(result, 'cli-id')
 
-    def test_uses_environment_value_when_cli_value_is_missing(self):
+    def test_uses_environment_value_when_cli_value_is_missing(self) -> None:
         """
         Checks that the environment supplies the default spreadsheet id.
         """
@@ -39,7 +39,7 @@ class TestResolveSpreadsheetId(TestCase):
 
         self.assertEqual(result, 'env-id')
 
-    def test_raises_when_no_spreadsheet_id_is_available(self):
+    def test_raises_when_no_spreadsheet_id_is_available(self) -> None:
         """
         Checks that missing spreadsheet ids fail clearly.
         """
@@ -53,7 +53,7 @@ class TestRunValidation(TestCase):
     Test cases for the standalone spreadsheet validation runner.
     """
 
-    def test_format_success_message_includes_worksheet_and_active_count(self):
+    def test_format_success_message_includes_worksheet_and_active_count(self) -> None:
         """
         Checks that success output includes the worksheet title and active collection count.
         """
@@ -65,7 +65,7 @@ class TestRunValidation(TestCase):
         self.assertIn('At Collection Level', result)
         self.assertIn('2 active collection jobs', result)
 
-    def test_run_validation_returns_zero_after_successful_validation(self):
+    def test_run_validation_returns_zero_after_successful_validation(self) -> None:
         """
         Checks that successful validation exits cleanly.
         """
@@ -81,7 +81,7 @@ class TestRunValidation(TestCase):
         self.assertEqual(result, 0)
         self.assertIn('Spreadsheet connection validated', mock_print.call_args.args[0])
 
-    def test_run_validation_returns_one_after_failed_validation(self):
+    def test_run_validation_returns_one_after_failed_validation(self) -> None:
         """
         Checks that failed validation returns a non-zero exit code.
         """
@@ -97,7 +97,7 @@ class TestRunValidation(TestCase):
         self.assertEqual(result, 1)
         self.assertIn('Spreadsheet connection validation failed', mock_print.call_args.args[0])
 
-    def test_run_validation_reports_contract_error_as_sheet_readiness_failure(self):
+    def test_run_validation_reports_contract_error_as_sheet_readiness_failure(self) -> None:
         """
         Checks that worksheet contract failures are not reported as connection failures.
         """

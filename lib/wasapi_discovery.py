@@ -2,16 +2,16 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import ParseResult, parse_qs, urlparse
 
 import httpx
 
-DEFAULT_WASAPI_BASE_URL = 'https://warcs.archive-it.org/wasapi/v1/webdata'
-DEFAULT_OVERLAP_DAYS = 30
-DEFAULT_PAGE_SIZE = 100
-RECORD_LIST_FIELD_CANDIDATES = ('results', 'files', 'items', 'data')
+DEFAULT_WASAPI_BASE_URL: str = 'https://warcs.archive-it.org/wasapi/v1/webdata'
+DEFAULT_OVERLAP_DAYS: int = 30
+DEFAULT_PAGE_SIZE: int = 100
+RECORD_LIST_FIELD_CANDIDATES: tuple[str, ...] = ('results', 'files', 'items', 'data')
 
-log = logging.getLogger(__name__)
+log: logging.Logger = logging.getLogger(__name__)
 
 
 class WasapiDiscoveryError(RuntimeError):
@@ -19,7 +19,7 @@ class WasapiDiscoveryError(RuntimeError):
     Represents a discovery failure that may still include partial results.
     """
 
-    def __init__(self, message: str, partial_result: 'DiscoveryResult | None' = None):
+    def __init__(self, message: str, partial_result: 'DiscoveryResult | None' = None) -> None:
         super().__init__(message)
         self.partial_result = partial_result
 
@@ -44,7 +44,7 @@ class DiscoveryResult:
     """
 
     collection_id: int
-    after_datetime: datetime
+    after_datetime: datetime | None
     records: list[dict[str, object]]
     request_records: list[DiscoveryRequestRecord]
     completed_successfully: bool
@@ -56,13 +56,13 @@ def parse_wasapi_datetime(value: str) -> datetime:
     Parses a WASAPI datetime string into an aware UTC datetime.
     Called by: compute_store_time_after_datetime()
     """
-    normalized = value.strip()
+    normalized: str = value.strip()
     if normalized.endswith('Z'):
         normalized = normalized[:-1] + '+00:00'
-    parsed = datetime.fromisoformat(normalized)
+    parsed: datetime = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
         raise ValueError(f'WASAPI datetime must include timezone information: {value}')
-    result = parsed.astimezone(UTC)
+    result: datetime = parsed.astimezone(UTC)
     return result
 
 
@@ -75,10 +75,10 @@ def compute_store_time_after_datetime(
     Computes the store-time-after boundary using the overlap window.
     Called by: determine_collection_discovery_mode()
     """
-    reference_datetime = now.astimezone(UTC)
+    reference_datetime: datetime = now.astimezone(UTC)
     if checkpoint_store_time_max is not None:
         reference_datetime = parse_wasapi_datetime(checkpoint_store_time_max)
-    result = reference_datetime - timedelta(days=overlap_days)
+    result: datetime = reference_datetime - timedelta(days=overlap_days)
     return result
 
 
@@ -87,8 +87,8 @@ def format_wasapi_datetime(value: datetime) -> str:
     Formats an aware datetime in the UTC form expected by WASAPI query params.
     Called by: fetch_collection_discovery()
     """
-    utc_value = value.astimezone(UTC)
-    result = utc_value.strftime('%Y-%m-%dT%H:%M:%SZ')
+    utc_value: datetime = value.astimezone(UTC)
+    result: str = utc_value.strftime('%Y-%m-%dT%H:%M:%SZ')
     return result
 
 
@@ -99,7 +99,7 @@ def extract_discovery_records(page_payload: dict[str, object]) -> list[dict[str,
     """
     records: list[dict[str, object]] | None = None
     for field_name in RECORD_LIST_FIELD_CANDIDATES:
-        candidate = page_payload.get(field_name)
+        candidate: object = page_payload.get(field_name)
         if candidate is not None:
             if not isinstance(candidate, list):
                 raise WasapiDiscoveryError(f'WASAPI page field `{field_name}` must be a JSON array.')
@@ -109,7 +109,7 @@ def extract_discovery_records(page_payload: dict[str, object]) -> list[dict[str,
             break
     if records is None:
         raise WasapiDiscoveryError('WASAPI page payload is missing a record list field.')
-    result = records
+    result: list[dict[str, object]] = records
     return result
 
 
@@ -119,9 +119,9 @@ def extract_record_store_time(record: dict[str, object]) -> str | None:
     Called by: compute_max_store_time()
     """
     result: str | None = None
-    candidate = record.get('store-time')
+    candidate: object = record.get('store-time')
     if isinstance(candidate, str):
-        cleaned = candidate.strip()
+        cleaned: str = candidate.strip()
         if cleaned:
             result = cleaned
     return result
@@ -135,15 +135,15 @@ def compute_max_store_time(records: list[dict[str, object]]) -> str | None:
     max_datetime: datetime | None = None
     max_store_time: str | None = None
     for record in records:
-        store_time = extract_record_store_time(record)
+        store_time: str | None = extract_record_store_time(record)
         if store_time is None:
             log.warning('Skipping checkpoint consideration for record missing store-time: %s', record)
             continue
-        parsed_store_time = parse_wasapi_datetime(store_time)
+        parsed_store_time: datetime = parse_wasapi_datetime(store_time)
         if max_datetime is None or parsed_store_time > max_datetime:
             max_datetime = parsed_store_time
             max_store_time = store_time
-    result = max_store_time
+    result: str | None = max_store_time
     return result
 
 
@@ -153,10 +153,10 @@ def get_next_page_number(page_payload: dict[str, object], current_page_number: i
     Called by: fetch_collection_discovery()
     """
     result: int | None = None
-    next_value = page_payload.get('next')
+    next_value: object = page_payload.get('next')
     if isinstance(next_value, str) and next_value:
-        parsed_url = urlparse(next_value)
-        page_values = parse_qs(parsed_url.query).get('page')
+        parsed_url: ParseResult = urlparse(next_value)
+        page_values: list[str] | None = parse_qs(parsed_url.query).get('page')
         if page_values and page_values[0].isdigit():
             result = int(page_values[0])
         elif next_value.isdigit():
@@ -164,7 +164,9 @@ def get_next_page_number(page_payload: dict[str, object], current_page_number: i
     elif isinstance(next_value, int):
         result = next_value
     else:
-        total_pages = page_payload.get('pages') or page_payload.get('total_pages') or page_payload.get('page_count')
+        total_pages: object = (
+            page_payload.get('pages') or page_payload.get('total_pages') or page_payload.get('page_count')
+        )
         if isinstance(total_pages, int) and current_page_number < total_pages:
             result = current_page_number + 1
     return result
@@ -175,7 +177,7 @@ def build_payload_debug_summary(page_payload: dict[str, object], page_records: l
     Builds a compact summary of one WASAPI response payload for debug logging.
     Called by: fetch_collection_discovery()
     """
-    result = {
+    result: dict[str, object] = {
         'keys': sorted(page_payload.keys()),
         'record_count': len(page_records),
         'count': page_payload.get('count'),
@@ -197,14 +199,16 @@ def fetch_collection_discovery(
     Fetches paginated WASAPI discovery records for one collection.
     Called by: process_collection_job()
     """
-    page_number = 1
+    page_number: int = 1
     discovered_records: list[dict[str, object]] = []
     request_records: list[DiscoveryRequestRecord] = []
-    after_datetime_utc = after_datetime.astimezone(UTC) if after_datetime is not None else None
-    formatted_after_datetime = format_wasapi_datetime(after_datetime_utc) if after_datetime_utc is not None else None
+    after_datetime_utc: datetime | None = after_datetime.astimezone(UTC) if after_datetime is not None else None
+    formatted_after_datetime: str | None = (
+        format_wasapi_datetime(after_datetime_utc) if after_datetime_utc is not None else None
+    )
 
     while True:
-        requested_at = datetime.now(UTC)
+        requested_at: datetime = datetime.now(UTC)
         params: dict[str, object] = {
             'collection': collection_id,
             'page': page_number,
@@ -232,10 +236,10 @@ def fetch_collection_discovery(
                 ),
             )
             response.raise_for_status()
-            payload = response.json()
+            payload: object = response.json()
             if not isinstance(payload, dict):
                 raise WasapiDiscoveryError('WASAPI response JSON is not an object.')
-            page_records = extract_discovery_records(payload)
+            page_records: list[dict[str, object]] = extract_discovery_records(payload)
             log.debug(
                 'Collection %s page %s payload summary: %s',
                 collection_id,
@@ -249,7 +253,7 @@ def fetch_collection_discovery(
                 json.dumps(payload, sort_keys=True),
             )
             discovered_records.extend(page_records)
-            next_page_number = get_next_page_number(payload, page_number)
+            next_page_number: int | None = get_next_page_number(payload, page_number)
             if next_page_number is None:
                 break
             page_number = next_page_number
@@ -264,7 +268,7 @@ def fetch_collection_discovery(
                         status_code=None,
                     ),
                 )
-            partial_result = DiscoveryResult(
+            partial_result: DiscoveryResult = DiscoveryResult(
                 collection_id=collection_id,
                 after_datetime=after_datetime_utc,
                 records=list(discovered_records),
@@ -278,8 +282,8 @@ def fetch_collection_discovery(
                 f'Failed fetching collection {collection_id} page {page_number}: {exc}', partial_result
             ) from exc
 
-    max_store_time = compute_max_store_time(discovered_records)
-    result = DiscoveryResult(
+    max_store_time: str | None = compute_max_store_time(discovered_records)
+    result: DiscoveryResult = DiscoveryResult(
         collection_id=collection_id,
         after_datetime=after_datetime_utc,
         records=discovered_records,

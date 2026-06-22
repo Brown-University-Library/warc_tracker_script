@@ -23,7 +23,7 @@ class TestLocalStatePaths(TestCase):
     Test cases for local state path helpers.
     """
 
-    def test_builds_collection_root_and_state_file_paths(self):
+    def test_builds_collection_root_and_state_file_paths(self) -> None:
         """
         Checks that collection paths match the v05 storage layout.
         """
@@ -41,7 +41,7 @@ class TestLoadCollectionState(TestCase):
     Test cases for loading collection state.
     """
 
-    def test_returns_default_state_when_file_is_missing(self):
+    def test_returns_default_state_when_file_is_missing(self) -> None:
         """
         Checks that missing state files return the default state.
         """
@@ -52,7 +52,7 @@ class TestLoadCollectionState(TestCase):
 
             self.assertEqual(result, make_default_collection_state())
 
-    def test_load_fills_missing_required_keys(self):
+    def test_load_fills_missing_required_keys(self) -> None:
         """
         Checks that missing top-level keys are filled from defaults.
         """
@@ -67,7 +67,7 @@ class TestLoadCollectionState(TestCase):
             self.assertEqual(result['enumeration_checkpoint_store_time_max'], None)
             self.assertEqual(result['files'], {'alpha.warc.gz': {'status': 'downloaded'}})
 
-    def test_raises_for_malformed_json(self):
+    def test_raises_for_malformed_json(self) -> None:
         """
         Checks that malformed JSON raises a clear local-state error.
         """
@@ -80,7 +80,7 @@ class TestLoadCollectionState(TestCase):
             with self.assertRaises(LocalStateError):
                 load_collection_state(storage_root, 123)
 
-    def test_raises_when_top_level_json_is_not_an_object(self):
+    def test_raises_when_top_level_json_is_not_an_object(self) -> None:
         """
         Checks that non-object JSON payloads raise a clear local-state error.
         """
@@ -99,7 +99,7 @@ class TestSaveCollectionState(TestCase):
     Test cases for saving collection state.
     """
 
-    def test_save_and_load_round_trip(self):
+    def test_save_and_load_round_trip(self) -> None:
         """
         Checks that a saved state can be loaded back successfully.
         """
@@ -122,7 +122,7 @@ class TestSaveCollectionState(TestCase):
 
             self.assertEqual(result, state)
 
-    def test_save_creates_final_state_file_without_leftover_temp_files(self):
+    def test_save_creates_final_state_file_without_leftover_temp_files(self) -> None:
         """
         Checks that save leaves a final state.json and no leftover temp file.
         """
@@ -143,7 +143,7 @@ class TestPlannedDownloadManifestUpdates(TestCase):
     Test cases for pre-download manifest persistence.
     """
 
-    def test_records_pending_download_metadata_for_new_entry(self):
+    def test_records_pending_download_metadata_for_new_entry(self) -> None:
         """
         Checks that planned download metadata is persisted before any download attempt occurs.
         """
@@ -162,7 +162,7 @@ class TestPlannedDownloadManifestUpdates(TestCase):
         self.assertEqual(result['warc_path'], '/tmp/storage/collections/123/UNKNOWN_SEED/2026/03/alpha.warc.gz')
         self.assertEqual(result['discovered_at'], '2026-03-07T15:00:00+00:00')
 
-    def test_preserves_downloaded_status_when_refreshing_planned_metadata(self):
+    def test_preserves_downloaded_status_when_refreshing_planned_metadata(self) -> None:
         """
         Checks that already-downloaded entries keep their downloaded status when planning metadata is refreshed.
         """
