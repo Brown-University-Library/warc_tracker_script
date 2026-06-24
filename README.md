@@ -5,6 +5,12 @@ on this page...
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
+- [To run the backup workflow](#to-run-the-backup-workflow)
+- [To get an overview of what's been downloaded](#to-get-an-overview-of-whats-been-downloaded)
+- [To validate that a spreadsheet can be opened, parsed, and edited before running the backup workflow](#to-validate-that-a-spreadsheet-can-be-opened-parsed-and-edited-before-running-the-backup-workflow)
+- [To run tests](#to-run-tests)
+- [To capture WASAPI metadata for one collection without downloading WARC files](#to-capture-wasapi-metadata-for-one-collection-without-downloading-warc-files)
+- [To check for downloaded WARC files that could not be assigned to a seed folder](#to-check-for-downloaded-warc-files-that-could-not-be-assigned-to-a-seed-folder)
 - [What the script does](#what-the-script-does)
 - [How it works in practice](#how-it-works-in-practice)
 - [Current state of the project](#current-state-of-the-project)
@@ -13,6 +19,7 @@ on this page...
   - [why is the local filesystem the source of truth?](#why-is-the-local-filesystem-the-source-of-truth)
   - [what gets stored for each collection?](#what-gets-stored-for-each-collection)
   - [spreadsheet updates](#spreadsheet-updates)
+- [Current code module responsibilities](#current-code-module-responsibilities)
 
 
 ## Overview
@@ -81,7 +88,7 @@ UNKNOWN_SEED_ALERT_SMTP_PORT="25"
 
 ## Usage
 
-To run the backup workflow:
+## To run the backup workflow
 
 ```shell
 uv run ./main.py
@@ -95,26 +102,56 @@ time nice -n 19 ionice -c 3 uv run ./main.py
 
 That's the lowest-impact `nice` setting, which addresses cpu-load. And that's the lowest-impact `ionice` setting, which addresses i/o.
 
-To validate that a spreadsheet can be opened, parsed, and edited before running the backup workflow:
+## To get an overview of what's been downloaded
+
+``` shell
+$ cd /to/download_dir/ 
+$ tree -L 3
+.
+└── collections
+    ├── 15887
+    │   ├── SEED2529150
+    │   ├── SEED2529151
+    │   ├── state.json
+    │   └── UNKNOWN_SEED
+    ├── 22900
+    │   ├── SEED3256845
+    │   ├── SEED3259231
+    │   ├── SEED3364270
+    │   ├── state.json
+    │   └── UNKNOWN_SEED
+    └── 30875
+        ├── SEED4566330
+        ├── SEED4566331
+        [ --- SNIP --- ]
+        ├── SEED4607655
+        ├── SEED4660252
+        ├── state.json
+        └── UNKNOWN_SEED
+
+61 directories, 3 files
+```
+
+## To validate that a spreadsheet can be opened, parsed, and edited before running the backup workflow
 
 ```shell
 uv run ./validate_spreadsheet_connection.py --spreadsheet-id the-google-sheet-id
 ```
 
-To run tests:
+## To run tests
 
 ```shell
 uv run ./run_tests.py
 uv run ./run_tests.py -v tests.test_orchestration
 ```
 
-To capture WASAPI metadata for one collection without downloading WARC files:
+## To capture WASAPI metadata for one collection without downloading WARC files
 
 ```shell
 uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./wasapi_inspection
 ```
 
-To check for downloaded WARC files that could not be assigned to a seed folder:
+## To check for downloaded WARC files that could not be assigned to a seed folder
 
 ```shell
 uv run ./cron_scripts/check_for_unknown_seeds.py --dry-run
