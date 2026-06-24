@@ -2,6 +2,7 @@
 
 on this page...
 - [Overview](#overview)
+- [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
 - [What the script does](#what-the-script-does)
@@ -13,6 +14,7 @@ on this page...
   - [what gets stored for each collection?](#what-gets-stored-for-each-collection)
   - [spreadsheet updates](#spreadsheet-updates)
 
+
 ## Overview
 
 This script backs up Archive-It WARC files for collections listed as active in a Google Sheets tracking spreadsheet.
@@ -20,6 +22,12 @@ This script backs up Archive-It WARC files for collections listed as active in a
 At a high level, it checks which collections are active, asks WASAPI (Archive-It's Web Archiving Systems API) what WARC files are available, downloads anything missing, writes local fixity information, and updates the spreadsheet with collection-level progress.
 
 The local filesystem is treated as the source of truth. The spreadsheet is mainly there to help monitor activity and control which collections are in scope.
+
+
+## Requirements
+
+- [uv](https://docs.astral.sh/uv/#installation)
+
 
 ## Installation
 
@@ -69,6 +77,7 @@ UNKNOWN_SEED_ALERT_SMTP_PORT="25"
 
 `UNKNOWN_SEED_ALERT_RECIPIENTS` is used by `cron_scripts/check_for_unknown_seeds.py`. It must be JSON that parses to a list of `(name, email_address)` pairs.
 
+
 ## Usage
 
 Run the backup workflow:
@@ -103,6 +112,7 @@ uv run ./cron_scripts/check_for_unknown_seeds.py --dry-run
 uv run ./cron_scripts/check_for_unknown_seeds.py
 ```
 
+
 ## What the script does
 
 - Reads the tracking spreadsheet and selects active collections.
@@ -112,6 +122,7 @@ uv run ./cron_scripts/check_for_unknown_seeds.py
 - Records per-collection state on disk so later runs can continue safely.
 - Updates the spreadsheet with simple collection-level progress and summary information.
 
+
 ## How it works in practice
 
 - The script will be run via a cron-job, but can also be run manually.
@@ -120,11 +131,13 @@ uv run ./cron_scripts/check_for_unknown_seeds.py
 - Files are downloaded into a predictable collection/seed/year/month folder structure.
 - Each collection keeps a local `state.json` file so the script can remember what it has already seen and what may need retrying.
 
+
 ## Current state of the project
 
 - The current production flow processes collections sequentially.
 - It already performs collection discovery, download planning, downloading, fixity writing, and collection-level spreadsheet updates.
 - The design plan still leaves room for a later concurrent version with dedicated download workers and a separate spreadsheet updater.
+
 
 ## FAQs
 
