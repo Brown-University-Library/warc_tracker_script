@@ -27,6 +27,7 @@ The local filesystem is treated as the source of truth. The spreadsheet is mainl
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/#installation)
+- Create Google Cloud service-account credentials; share the spreadsheet with its `client_email` as Editor so the script can write updates.
 
 
 ## Installation
