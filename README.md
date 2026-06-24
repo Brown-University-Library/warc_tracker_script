@@ -81,32 +81,40 @@ UNKNOWN_SEED_ALERT_SMTP_PORT="25"
 
 ## Usage
 
-Run the backup workflow:
+To run the backup workflow:
 
 ```shell
 uv run ./main.py
 ```
 
-Validate that a spreadsheet can be opened, parsed, and edited before running the backup workflow:
+But on the server, use this:
+
+```shell
+time nice -n 19 ionice -c 3 uv run ./main.py
+```
+
+That's the lowest-impact `nice` setting, which addresses cpu-load. And that's the lowest-impact `ionice` setting, which addresses i/o.
+
+To validate that a spreadsheet can be opened, parsed, and edited before running the backup workflow:
 
 ```shell
 uv run ./validate_spreadsheet_connection.py --spreadsheet-id the-google-sheet-id
 ```
 
-Run tests:
+To run tests:
 
 ```shell
 uv run ./run_tests.py
 uv run ./run_tests.py -v tests.test_orchestration
 ```
 
-Capture WASAPI metadata for one collection without downloading WARC files:
+To capture WASAPI metadata for one collection without downloading WARC files:
 
 ```shell
 uv run ./tmp_inspect_collection_wasapi.py --collection-id 12345 --output-dir ./wasapi_inspection
 ```
 
-Check for downloaded WARC files that could not be assigned to a seed folder:
+To check for downloaded WARC files that could not be assigned to a seed folder:
 
 ```shell
 uv run ./cron_scripts/check_for_unknown_seeds.py --dry-run
