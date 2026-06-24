@@ -5,6 +5,19 @@ This file defines the canonical coding directives for this repository.
 If other instruction files exist (Copilot, IDE rules, contributor docs) and conflict with this file, follow this file and treat the others as stale.
 
 
+## Index
+
+- [Project basics](#project-basics)
+- [Project index](#project-index)
+- [How to run code](#how-to-run-code)
+- [Coding directives (Python)](#coding-directives-python)
+- [Django architecture conventions](#django-architecture-conventions)
+- [Front-end change guidance](#front-end-change-guidance)
+- [Tests](#tests)
+- [Change workflow expectations](#change-workflow-expectations)
+- [If instructions are missing or ambiguous](#if-instructions-are-missing-or-ambiguous)
+
+
 ## Project basics
 
 - Primary language: Python
