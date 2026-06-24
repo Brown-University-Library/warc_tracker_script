@@ -12,7 +12,7 @@ dotenv.load_dotenv()
 log: logging.Logger = logging.getLogger(__name__)
 
 COLLECTION_SHEET_NAME: str = 'At Collection Level'
-REQUIRED_HEADER_FIELDS: tuple[str, ...] = ('collection_id', 'active_inactive')
+REQUIRED_HEADER_FIELDS: tuple[str, ...] = ('collection_id', 'collection_status')
 REQUIRED_REPORTING_FIELDS: tuple[str, ...] = (
     'status_last_fetch',
     'status_detail',
@@ -30,7 +30,7 @@ HEADER_ALIASES: dict[str, set[str]] = {
     'collection_url': {'collection url'},
     'collection_name': {'collection name'},
     'seed_count': {'seed count'},
-    'active_inactive': {'active/inactive', 'active / inactive'},
+    'collection_status': {'collection-status'},
     'status_last_fetch': {'status-last-fetch', 'processing_status_main', 'status-main'},
     'status_detail': {
         'status-detail',
@@ -358,11 +358,15 @@ def parse_collection_jobs(values: list[list[str]]) -> list[CollectionJob]:
             if collection_id is None:
                 continue
 
-            active_value: str | None = get_row_cell(row, header_location.column_map.get('active_inactive'))
-            active_flag: str = (active_value or '').strip()
-            if active_flag != 'Active':
-                if active_flag:
-                    log.warning('Skipping collection row %s with unexpected active flag: %s', row_number, active_flag)
+            collection_status_value: str | None = get_row_cell(row, header_location.column_map.get('collection_status'))
+            collection_status: str = (collection_status_value or '').strip()
+            if collection_status != 'Active':
+                if collection_status:
+                    log.warning(
+                        'Skipping collection row %s with unexpected collection status: %s',
+                        row_number,
+                        collection_status,
+                    )
                 continue
 
             repository: str | None = get_row_cell(row, header_location.column_map.get('repository'))

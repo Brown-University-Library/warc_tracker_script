@@ -60,7 +60,7 @@ class TestParseCollectionJobs(TestCase):
         """
         values = [
             ['Notes above header'],
-            ['Collection ID', 'Repository', 'Collection URL', 'Collection name', 'Active/Inactive'],
+            ['Collection ID', 'Repository', 'Collection URL', 'Collection name', 'Collection-Status'],
             ['123', 'UA', 'https://example.com/1', 'Example One', 'Active'],
             ['456', 'MS', 'https://example.com/2', 'Example Two', 'Inactive'],
         ]
@@ -70,18 +70,31 @@ class TestParseCollectionJobs(TestCase):
         self.assertEqual(result[0].repository, 'UA')
         self.assertEqual(result[0].row_number, 3)
 
-    def test_header_variants(self) -> None:
+    def test_old_active_inactive_header_is_not_accepted(self) -> None:
         """
-        Checks that header spacing variants are accepted.
+        Checks that the old active/inactive header no longer satisfies the sheet contract.
         """
         values = [
             ['Header row follows'],
-            ['Collection ID', 'Repository', 'Active / Inactive'],
+            ['Collection ID', 'Repository', 'Active/Inactive'],
             ['789', 'UA', 'Active'],
         ]
         result = parse_collection_jobs(values)
+        self.assertEqual(result, [])
+
+    def test_collection_status_header_is_accepted(self) -> None:
+        """
+        Checks that the production collection status header is accepted.
+        """
+        values = [
+            ['Notes above header'],
+            ['Collection ID', 'Repository', 'Collection-Status'],
+            ['321', 'UA', 'Active'],
+        ]
+        result = parse_collection_jobs(values)
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].collection_id, 789)
+        self.assertEqual(result[0].collection_id, 321)
+        self.assertEqual(result[0].repository, 'UA')
 
     def test_new_reporting_column_labels_are_accepted(self) -> None:
         """
@@ -93,7 +106,7 @@ class TestParseCollectionJobs(TestCase):
             ['More notes'],
             [
                 'Collection ID',
-                'Active/Inactive',
+                'Collection-Status',
                 'Seed Count',
                 'status-last-fetch',
                 'status-detail',
@@ -137,7 +150,7 @@ class TestCollectionReportingContract(TestCase):
             header_row_index=1,
             column_map={
                 'collection_id': 0,
-                'active_inactive': 1,
+                'collection_status': 1,
                 'status_last_fetch': 2,
                 'status_last_fetch_file_count': 3,
                 'last_download_timestamp': 4,
@@ -241,14 +254,14 @@ class TestCollectionSheetConnectionValidation(TestCase):
         """
         values = [
             ['Notes above header'],
-            ['Collection ID', 'Active/Inactive', 'Status-Main'],
+            ['Collection ID', 'Collection-Status', 'Status-Main'],
             ['123', 'Active', ''],
         ]
         header_location = HeaderLocation(
             header_row_index=1,
             column_map={
                 'collection_id': 0,
-                'active_inactive': 1,
+                'collection_status': 1,
                 'processing_status_main': 2,
             },
         )
@@ -266,7 +279,7 @@ class TestCollectionSheetConnectionValidation(TestCase):
             ['Notes above header'],
             [
                 'Collection ID',
-                'Active/Inactive',
+                'Collection-Status',
                 'Seed Count',
                 'status-last-fetch',
                 'status-detail',
