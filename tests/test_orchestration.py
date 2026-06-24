@@ -45,7 +45,7 @@ from lib.orchestration import (
     get_archive_it_credentials,
     get_blocking_coordination_summary,
     get_dev_collection_ids,
-    get_download_progress_milestone_update,
+    get_download_progress_file_interval_update,
     get_downloaded_storage_root,
     get_record_source_url,
     get_run_coordination_mode,
@@ -1251,33 +1251,45 @@ class TestRunPlannedDownloads(TestCase):
     Test cases for the sequential planned-download loop.
     """
 
-    def test_download_progress_helper_formats_expected_milestone_text(self) -> None:
+    def test_download_progress_helper_formats_expected_update_text(self) -> None:
         """
-        Checks that progress-detail text uses the expected compact milestone format.
+        Checks that progress-detail text uses the expected compact update format.
         """
         result = build_download_progress_detail(40, 6, 15)
 
         self.assertEqual(result, '40% (6/15 files)')
 
-    def test_download_progress_helper_emits_only_new_milestones(self) -> None:
+    def test_download_progress_helper_emits_every_ten_completed_downloads(self) -> None:
         """
-        Checks that milestone updates are emitted only when a new progress bucket is reached.
+        Checks that progress updates are emitted only when another ten downloads complete.
         """
-        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 1, 0)
-        self.assertEqual(last_reported_percent, 0)
+        last_reported_completed_count, progress_detail = get_download_progress_file_interval_update(25, 9, 0)
+        self.assertEqual(last_reported_completed_count, 0)
         self.assertIsNone(progress_detail)
 
-        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 3, last_reported_percent)
-        self.assertEqual(last_reported_percent, 20)
-        self.assertEqual(progress_detail, '20% (3/15 files)')
+        last_reported_completed_count, progress_detail = get_download_progress_file_interval_update(
+            25,
+            10,
+            last_reported_completed_count,
+        )
+        self.assertEqual(last_reported_completed_count, 10)
+        self.assertEqual(progress_detail, '40% (10/25 files)')
 
-        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 4, last_reported_percent)
-        self.assertEqual(last_reported_percent, 20)
+        last_reported_completed_count, progress_detail = get_download_progress_file_interval_update(
+            25,
+            11,
+            last_reported_completed_count,
+        )
+        self.assertEqual(last_reported_completed_count, 10)
         self.assertIsNone(progress_detail)
 
-        last_reported_percent, progress_detail = get_download_progress_milestone_update(15, 6, last_reported_percent)
-        self.assertEqual(last_reported_percent, 40)
-        self.assertEqual(progress_detail, '40% (6/15 files)')
+        last_reported_completed_count, progress_detail = get_download_progress_file_interval_update(
+            25,
+            20,
+            last_reported_completed_count,
+        )
+        self.assertEqual(last_reported_completed_count, 20)
+        self.assertEqual(progress_detail, '80% (20/25 files)')
 
     def test_logs_debug_message_immediately_before_download_attempt(self) -> None:
         """
@@ -1324,21 +1336,21 @@ class TestRunPlannedDownloads(TestCase):
             ),
         )
 
-    def test_progress_callback_emits_only_coarse_download_milestones(self) -> None:
+    def test_progress_callback_emits_every_ten_completed_downloads(self) -> None:
         """
-        Checks that the sequential download loop emits only coarse milestone progress updates.
+        Checks that the sequential download loop emits progress after every ten completed downloads.
         """
         planned_downloads = [
             PlannedDownload(
-                filename=f'ARCHIVEIT-123-2026030612345{index}-0000{index}-alpha.warc.gz',
+                filename=f'ARCHIVEIT-123-202603061234{index:02d}-0000{index}-alpha.warc.gz',
                 source_url=f'https://example.org/{index}.warc.gz',
                 planned_paths=build_planned_download_paths(
                     Path('/tmp/storage'),
                     123,
-                    [{'filename': f'ARCHIVEIT-123-2026030612345{index}-0000{index}-alpha.warc.gz'}],
+                    [{'filename': f'ARCHIVEIT-123-202603061234{index:02d}-0000{index}-alpha.warc.gz'}],
                 )[0],
             )
-            for index in range(5)
+            for index in range(25)
         ]
         state = {'files': {}}
         client = MagicMock(spec=httpx.Client)
@@ -1364,10 +1376,8 @@ class TestRunPlannedDownloads(TestCase):
         self.assertEqual(
             progress_updates,
             [
-                '20% (1/5 files)',
-                '40% (2/5 files)',
-                '60% (3/5 files)',
-                '80% (4/5 files)',
+                '40% (10/25 files)',
+                '80% (20/25 files)',
             ],
         )
 

@@ -276,14 +276,14 @@ If a WARC filename does not include a parseable `SEED...` value, the file is sto
   - after download planning completes
   - when no new files need download
   - when downloading begins
-  - at coarse in-progress milestones during downloading
+  - after every ten completed download attempts during downloading
   - when final collection reporting is written
 
-- The in-progress download updates are intentionally coarse rather than per-file chatter.
+- The in-progress download updates are intentionally batched rather than per-file chatter.
 
 - `status-last-fetch` holds the coarse machine-readable status, such as `discovery-in-progress` or `downloading-in-progress`.
 
-- `status-detail` holds the human-readable detail for that status, including discovery mode, no-new-files notes, final outcome details, and coarse download progress such as `40% (2/5 files)`.
+- `status-detail` holds the human-readable detail for that status, including discovery mode, no-new-files notes, final outcome details, and batched download progress such as `40% (10/25 files)`.
 
 - `status-last-fetch-file-count` holds the numeric count of WARC filename records returned by the latest WASAPI fetch.
 

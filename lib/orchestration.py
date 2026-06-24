@@ -61,7 +61,7 @@ BLOCKING_COORDINATION_STATUSES: frozenset[str] = frozenset(
     )
 )
 
-DOWNLOAD_PROGRESS_MILESTONES: tuple[int, ...] = (20, 40, 60, 80)
+DOWNLOAD_PROGRESS_FILE_INTERVAL: int = 10
 
 
 def format_local_display_timestamp(timestamp_text: str) -> str:
@@ -664,35 +664,38 @@ def build_download_start_status(
 
 def build_download_progress_detail(percent_complete: int, completed_count: int, total_count: int) -> str:
     """
-    Builds compact progress-detail text for one download milestone.
-    Called by: get_download_progress_milestone_update()
+    Builds compact progress-detail text for one download progress update.
+    Called by: get_download_progress_file_interval_update()
     """
     result: str = f'{percent_complete}% ({completed_count}/{total_count} files)'
     return result
 
 
-def get_download_progress_milestone_update(
+def get_download_progress_file_interval_update(
     total_count: int,
     completed_count: int,
-    last_reported_percent: int,
+    last_reported_completed_count: int,
 ) -> tuple[int, str | None]:
     """
-    Returns the next coarse progress milestone text, if a new milestone has been reached.
+    Returns progress text when another ten completed downloads have been reached.
     Called by: run_planned_downloads()
     """
-    next_reported_percent: int = last_reported_percent
+    next_reported_completed_count: int = last_reported_completed_count
     progress_detail: str | None = None
-    if total_count > 0 and completed_count < total_count:
+    if (
+        total_count > 0
+        and completed_count >= DOWNLOAD_PROGRESS_FILE_INTERVAL
+        and completed_count % DOWNLOAD_PROGRESS_FILE_INTERVAL == 0
+        and completed_count > last_reported_completed_count
+    ):
         percent_complete: int = (completed_count * 100) // total_count
-        for milestone_percent in DOWNLOAD_PROGRESS_MILESTONES:
-            if percent_complete >= milestone_percent and milestone_percent > last_reported_percent:
-                next_reported_percent = milestone_percent
-                progress_detail = build_download_progress_detail(
-                    milestone_percent,
-                    completed_count,
-                    total_count,
-                )
-    result: tuple[int, str | None] = (next_reported_percent, progress_detail)
+        next_reported_completed_count = completed_count
+        progress_detail = build_download_progress_detail(
+            percent_complete,
+            completed_count,
+            total_count,
+        )
+    result: tuple[int, str | None] = (next_reported_completed_count, progress_detail)
     return result
 
 
@@ -710,7 +713,7 @@ def run_planned_downloads(
     """
     results: list[DownloadResult] = []
     fixity_results: list[FixityResult] = []
-    last_reported_percent: int = 0
+    last_reported_completed_count: int = 0
     progress_detail: str | None = None
     total_planned_downloads: int = len(planned_downloads)
     for planned_download in planned_downloads:
@@ -825,13 +828,13 @@ def run_planned_downloads(
                 download_result.error_message,
             )
         completed_count: int = len(results)
-        last_reported_percent, progress_detail = get_download_progress_milestone_update(
+        last_reported_completed_count, progress_detail = get_download_progress_file_interval_update(
             total_planned_downloads,
             completed_count,
-            last_reported_percent,
+            last_reported_completed_count,
         )
         if progress_detail is not None and progress_callback is not None:
-            log.info('Collection %s wrote download progress milestone: %s', collection_id, progress_detail)
+            log.info('Collection %s wrote download progress update: %s', collection_id, progress_detail)
             progress_callback(progress_detail)
     result: tuple[list[DownloadResult], list[FixityResult]] = (results, fixity_results)
     return result
@@ -1132,7 +1135,7 @@ def write_collection_download_progress_status(
     discovered_warc_count: int,
 ) -> None:
     """
-    Writes one coarse collection-level download progress milestone.
+    Writes one collection-level download progress update.
     Called by: process_collection_job.<lambda>()
     """
     status_update: CollectionProcessingStatusUpdate = build_collection_status_update(
